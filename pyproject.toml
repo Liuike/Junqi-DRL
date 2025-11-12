@@ -1,0 +1,15 @@
+[project]
+name = "junqi-drl"
+version = "0.1.0"
+description = "Final project for CSCI1470 at Brown University"
+requires-python = "==3.11.6"
+dependencies = [
+    "open-spiel-junqi==1.4.3",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["junqi_drl"]

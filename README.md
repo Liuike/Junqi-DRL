@@ -14,6 +14,8 @@ This guide explains how to configure an OSCAR environment to develop or run the 
 pip install uv
 ```
 
+### 3. Find a folder you like and clone this repo and cd into the repo
+
 ## Step 2: Setting up Clang
 Before we can actually install the packages, open-spiel(the training environment) requires clang to actually work, and OSCAR uses something that isn't exactly clang, so we need the following setup.
 

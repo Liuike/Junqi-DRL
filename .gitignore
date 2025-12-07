@@ -4,3 +4,7 @@ __pycache__/
 *.pth
 .DS_Store
 **/.DS_Store
+logs
+
+slurm_logs/
+wandb/

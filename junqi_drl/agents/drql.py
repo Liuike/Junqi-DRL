@@ -5,6 +5,95 @@ import random
 import numpy as np
 from collections import deque
 
+
+class TemporalStratifiedReplayBuffer:
+    """
+    Temporal stratified replay buffer that divides the buffer into time segments
+    and samples proportionally from each segment to ensure early experiences are represented.
+    """
+    def __init__(self, maxlen=100000, num_segments=4):
+        """
+        Args:
+            maxlen: Maximum buffer size
+            num_segments: Number of temporal segments to divide the buffer into
+        """
+        self.maxlen = maxlen
+        self.num_segments = num_segments
+        self.segment_size = maxlen // num_segments
+        
+        # Create separate deques for each temporal segment
+        self.segments = [deque(maxlen=self.segment_size) for _ in range(num_segments)]
+        self.current_segment = 0
+        self.total_added = 0
+        
+    def append(self, transition):
+        """
+        Add transition to the current segment.
+        Advances to next segment when current is full.
+        """
+        self.segments[self.current_segment].append(transition)
+        self.total_added += 1
+        
+        # Move to next segment in round-robin fashion when segment is full
+        if len(self.segments[self.current_segment]) >= self.segment_size:
+            self.current_segment = (self.current_segment + 1) % self.num_segments
+    
+    def sample(self, batch_size):
+        """
+        Sample uniformly from all temporal segments.
+        Each segment contributes proportionally to its size.
+        """
+        batch = []
+        
+        # Count non-empty segments
+        non_empty_segments = [seg for seg in self.segments if len(seg) > 0]
+        
+        if not non_empty_segments:
+            return batch
+        
+        # Calculate samples per segment (uniform across non-empty segments)
+        samples_per_segment = batch_size // len(non_empty_segments)
+        remainder = batch_size % len(non_empty_segments)
+        
+        for i, segment in enumerate(non_empty_segments):
+            # Add extra sample to first 'remainder' segments to reach exact batch_size
+            n_samples = samples_per_segment + (1 if i < remainder else 0)
+            n_samples = min(n_samples, len(segment))
+            
+            batch.extend(random.sample(list(segment), n_samples))
+        
+        # If we still don't have enough, sample with replacement from all segments
+        if len(batch) < batch_size:
+            all_transitions = []
+            for segment in non_empty_segments:
+                all_transitions.extend(list(segment))
+            
+            if all_transitions:
+                remaining = batch_size - len(batch)
+                batch.extend(random.choices(all_transitions, k=remaining))
+        
+        return batch
+    
+    def __len__(self):
+        """Total number of transitions across all segments."""
+        return sum(len(seg) for seg in self.segments)
+    
+    def get_stats(self):
+        """Return statistics about buffer composition."""
+        stats = {
+            'total': len(self),
+            'segments': []
+        }
+        
+        for i, segment in enumerate(self.segments):
+            stats['segments'].append({
+                'id': i,
+                'size': len(segment),
+                'is_current': i == self.current_segment
+            })
+        
+        return stats
+
 class DRQNetwork(nn.Module):
     def __init__(self, obs_dim, action_dim, hidden_size=256):
         super().__init__()
@@ -38,14 +127,14 @@ class DRQNetwork(nn.Module):
 
 class DRQLAgent:
     def __init__(self, player_id, obs_dim, action_dim, lr=5e-4, gamma=0.99, 
-                 epsilon=1.0, device="cpu", hidden_size=256):
+                 epsilon=1.0, device="cpu", hidden_size=256, use_stratified_buffer=True, num_segments=4):
         self.player_id = player_id
         self.obs_dim = obs_dim
         self.action_dim = action_dim
         self.gamma = gamma
         self.epsilon = epsilon
-        self.epsilon_decay = 0.9995  # Slower decay
-        self.epsilon_min = 0.05  # Higher minimum for exploration
+        self.epsilon_decay = 0.9995 
+        self.epsilon_min = 0.20
         self.device = device
 
         self.q_net = DRQNetwork(obs_dim, action_dim, hidden_size).to(device)
@@ -54,7 +143,13 @@ class DRQLAgent:
         self.optimizer = optim.Adam(self.q_net.parameters(), lr=lr)
         self.loss_fn = nn.SmoothL1Loss()  # Huber loss is more stable
 
-        self.replay_buffer = deque(maxlen=10000)  # Larger buffer
+        # Use temporal stratified buffer or regular deque
+        if use_stratified_buffer:
+            self.replay_buffer = TemporalStratifiedReplayBuffer(maxlen=1000000, num_segments=num_segments)
+        else:
+            self.replay_buffer = deque(maxlen=100000)
+        self.use_stratified_buffer = use_stratified_buffer
+        
         self.hidden = None
         
         # For tracking statistics
@@ -86,21 +181,15 @@ class DRQLAgent:
     def store_transition(self, obs, action, reward, next_obs, done):
         self.replay_buffer.append((obs, action, reward, next_obs, done))
 
-    def compute_n_step_returns(self, rewards, gamma=0.99, n=5):
-        """Compute n-step returns for better credit assignment"""
-        n_step_rewards = []
-        for i in range(len(rewards)):
-            n_step_return = 0
-            for j in range(min(n, len(rewards) - i)):
-                n_step_return += (gamma ** j) * rewards[i + j]
-            n_step_rewards.append(n_step_return)
-        return n_step_rewards
-
     def train(self, batch_size=64):
         if len(self.replay_buffer) < batch_size:
             return None
 
-        batch = random.sample(self.replay_buffer, batch_size)
+        # Sample based on buffer type
+        if self.use_stratified_buffer:
+            batch = self.replay_buffer.sample(batch_size)
+        else:
+            batch = random.sample(self.replay_buffer, batch_size)
         
         # Unpack batch
         obs_list = [t[0] for t in batch]
@@ -113,20 +202,27 @@ class DRQLAgent:
         obs_batch = torch.cat(obs_list, dim=0)  # (batch, 1, obs_dim)
         next_obs_batch = torch.cat(next_obs_list, dim=0)  # (batch, 1, obs_dim)
 
-        # Current Q values
-        current_q, _ = self.q_net(obs_batch, None)  # (batch, 1, action_dim)
+        # Initialize hidden states for batch processing
+        batch_hidden = self.q_net.init_hidden(batch_size=batch_size, device=self.device)
+        
+        # Current Q values with initialized hidden state
+        current_q, _ = self.q_net(obs_batch, batch_hidden)  # (batch, 1, action_dim)
         current_q = current_q.squeeze(1)  # (batch, action_dim)
         current_q = current_q.gather(1, actions.unsqueeze(1)).squeeze(1)  # (batch,)
 
         # Target Q values with Double DQN
         with torch.no_grad():
+            # Initialize hidden for next states
+            next_batch_hidden = self.q_net.init_hidden(batch_size=batch_size, device=self.device)
+            
             # Use online network to select actions
-            next_q_online, _ = self.q_net(next_obs_batch, None)
+            next_q_online, _ = self.q_net(next_obs_batch, next_batch_hidden)
             next_q_online = next_q_online.squeeze(1)
             next_actions = next_q_online.argmax(dim=1)
             
             # Use target network to evaluate actions
-            next_q_target, _ = self.target_net(next_obs_batch, None)
+            target_batch_hidden = self.target_net.init_hidden(batch_size=batch_size, device=self.device)
+            next_q_target, _ = self.target_net(next_obs_batch, target_batch_hidden)
             next_q_target = next_q_target.squeeze(1)
             next_q_value = next_q_target.gather(1, next_actions.unsqueeze(1)).squeeze(1)
             
@@ -137,13 +233,40 @@ class DRQLAgent:
         self.optimizer.zero_grad()
         loss.backward()
         # Gradient clipping for stability
-        torch.nn.utils.clip_grad_norm_(self.q_net.parameters(), max_norm=1.0)
+        total_grad_norm = torch.nn.utils.clip_grad_norm_(self.q_net.parameters(), max_norm=1.0)
         self.optimizer.step()
 
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
+        
+        # Compute additional metrics for logging
+        metrics = {
+            'loss': loss.item(),
+            'grad_norm_total': total_grad_norm.item(),
+            'q_mean': current_q.mean().item(),
+            'q_std': current_q.std().item(),
+        }
+        
+        # Per-layer gradient norms (all layers individually)
+        with torch.no_grad():
+            for name, param in self.q_net.named_parameters():
+                if param.grad is not None:
+                    grad_norm = param.grad.norm().item()
+                    # Use full parameter name for detailed logging
+                    clean_name = name.replace('.', '/')
+                    metrics[f'grad_norm/{clean_name}'] = grad_norm
+        
+        # Compute action entropy from Q-values
+        with torch.no_grad():
+            q_vals_full, _ = self.q_net(obs_batch, batch_hidden)
+            q_vals_full = q_vals_full.squeeze(1)  # (batch, action_dim)
+            # Convert Q-values to probabilities using softmax
+            probs = torch.softmax(q_vals_full, dim=1)
+            # Compute entropy: -sum(p * log(p))
+            entropy = -(probs * torch.log(probs + 1e-10)).sum(dim=1).mean()
+            metrics['action_entropy'] = entropy.item()
             
-        return loss.item()
+        return metrics
 
     def update_target(self):
         self.target_net.load_state_dict(self.q_net.state_dict())

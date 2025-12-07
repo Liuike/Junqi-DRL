@@ -3,3 +3,6 @@ __pycache__/
 *$py.class
 *.pth
 logs
+
+slurm_logs/
+wandb/

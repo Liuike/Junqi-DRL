@@ -10,10 +10,35 @@ from junqi_drl.game import junqi_standard
 from junqi_drl.agents.drql import DRQLAgent
 from junqi_drl.agents.random_agent import RandomAgent
 
+try:
+    import wandb
+    WANDB_AVAILABLE = True
+except ImportError:
+    WANDB_AVAILABLE = False
+    print("Warning: wandb not available, metrics will not be logged to W&B")
+
 gamemode = "junqi_8x3"
 
 
-def evaluate_model(model_path, num_games=100, device="cpu", verbose=True):
+def evaluate_model(model_path, num_games=100, device="cpu", verbose=True, use_wandb=False, wandb_project="junqi-drql-eval", wandb_run_name=None):
+    # Initialize wandb if requested
+    if use_wandb and WANDB_AVAILABLE:
+        model_name = os.path.basename(model_path)
+        run_name = wandb_run_name or f"eval_{model_name}"
+        wandb.init(
+            project=wandb_project,
+            name=run_name,
+            config={
+                "model_path": model_path,
+                "num_games": num_games,
+                "device": str(device),
+                "opponent": "random"
+            }
+        )
+        use_wandb = True
+    else:
+        use_wandb = False
+        
     game = pyspiel.load_game(gamemode)
     obs_dim = np.prod(game.observation_tensor_shape())
     action_dim = game.num_distinct_actions()
@@ -69,7 +94,7 @@ def evaluate_model(model_path, num_games=100, device="cpu", verbose=True):
     avg_moves = np.mean(total_moves)
     
     print(f"\n{'='*60}")
-    print(f"Evaluation Results ({num_games})")
+    print(f"Evaluation vs Random ({num_games} games)")
     print(f"{'='*60}")
     print(f"Win Rate:       {win_rate:.2%} ({wins} wins)")
     print(f"Draw Rate:      {draw_rate:.2%} ({draws} draws)")
@@ -77,21 +102,22 @@ def evaluate_model(model_path, num_games=100, device="cpu", verbose=True):
     print(f"Avg Moves:      {avg_moves:.1f}")
     print(f"{'='*60}\n")
     
+    # Log to wandb
+    if use_wandb:
+        wandb.log({
+            "eval_vs_random/winrate": win_rate,
+            "eval_vs_random/drawrate": draw_rate,
+            "eval_vs_random/lossrate": loss_rate,
+            "eval_vs_random/wins": wins,
+            "eval_vs_random/draws": draws,
+            "eval_vs_random/losses": losses,
+            "eval_vs_random/avg_moves": avg_moves
+        })
+        wandb.finish()
+    
     return {
         'win_rate': win_rate,
         'draw_rate': draw_rate,
         'loss_rate': loss_rate,
         'avg_moves': avg_moves
     }
-
-
-if __name__ == "__main__":
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}\n")
-    
-    model_path = "./models/drql_best_wr0.850_ep1000.pth"
-    
-    if not os.path.exists(model_path):
-        print(f"Error: Model not found at {model_path}")
-    else:
-        evaluate_model(model_path, num_games=200, device=device)

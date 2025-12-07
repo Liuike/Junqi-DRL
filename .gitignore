@@ -1,5 +1,8 @@
 __pycache__/
 *.py[cod]
 *$py.class
-
+*.pth
 logs
+
+slurm_logs/
+wandb/

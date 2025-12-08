@@ -180,7 +180,7 @@ class TransformerAgent(BaseAgent):
         if self.pending_to_idx is not None:
             if state.selecting_piece:
                 # Synchronization error check
-                print("Warning: Pending move exists but Env expects Select. Clearing pending.")
+                # print("Warning: Pending move exists but Env expects Select. Clearing pending.")
                 self.pending_to_idx = None
             else:
                 action = self.pending_to_idx

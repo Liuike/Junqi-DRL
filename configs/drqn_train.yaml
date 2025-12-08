@@ -1,0 +1,51 @@
+# DRQN Training Configuration - Production Training
+# Full-scale training with WandB logging and spatial network
+
+game:
+  mode: junqi_8x3
+  board_variant: small
+
+training:
+  num_episodes: 10000   # Long training for convergence
+  num_iterations: 10000  # Not used for DRQN but required by config
+  eval_every: 500       # Evaluate every 500 episodes
+  eval_episodes: 200    # More evaluation games for better statistics
+  save_dir: models/drqn_full
+  device: auto  # auto, cpu, or cuda
+  seed: null
+  
+agent:
+  type: drqn
+  network_type: spatial  # Use spatial CNN for best performance
+  hidden_size: 256      # Standard hidden size
+  
+  # Training Hyperparameters
+  lr: 0.0005            # Learning rate
+  gamma: 0.99           # Discount factor
+  
+  # Exploration Schedule
+  epsilon_start: 1.0    # Start with full exploration
+  epsilon_min: 0.05     # Minimum exploration rate
+  epsilon_decay: 0.9995 # Gradual decay
+  
+  # Experience Replay
+  batch_size: 64
+  replay_buffer_size: 100000
+  use_stratified_buffer: true  # Use temporal stratified sampling
+  num_segments: 4
+  
+  # Network Updates
+  target_update_freq: 300      # Update target network every 300 episodes
+  opponent_update_freq: 500    # Update opponent every 500 episodes
+
+wandb:
+  enabled: true
+  project: junqi-drql
+  entity: null
+  run_name: drqn_spatial_production_run
+  tags:
+    - production
+    - spatial
+    - junqi_8x3
+    - dqn
+    - self-play

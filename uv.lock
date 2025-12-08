@@ -157,6 +157,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "open-spiel-junqi" },
+    { name = "pyyaml" },
     { name = "torch" },
     { name = "wandb" },
 ]
@@ -164,6 +165,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "open-spiel-junqi", specifier = "==1.4.3" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "torch", specifier = ">=2.9.1" },
     { name = "wandb", specifier = ">=0.23.1" },
 ]

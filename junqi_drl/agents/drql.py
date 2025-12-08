@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 import random
 import numpy as np
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict
 from collections import deque
 
 from .base_agent import BaseAgent

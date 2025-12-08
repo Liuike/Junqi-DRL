@@ -15,8 +15,6 @@ from junqi_drl.agents.junqi_transformer import JunqiMoveTransformer
 from junqi_drl.agents.transformer_agent import TransformerAgent
 from junqi_drl.agents.random_agent import RandomAgent
 from junqi_drl.core.metrics import MetricsLogger
-# Import game modules so pyspiel knows about registrations.
-
 
 def apply_transformer_action(state, action_int, num_cells, pass_action_env_id):
     """

@@ -188,8 +188,10 @@ class TransformerAgent(BaseAgent):
                 return action
 
         # Case 2: Pass action handling (Env might only allow Pass)
-        if state.legal_actions(self.player_id) == [self.pass_action_id]:
-            return self.pass_action_id
+        pass_id = len(state.decode_action)
+        legal_actions = state.legal_actions(self.player_id)
+        if legal_actions == [pass_id]:
+           return pass_id
 
         # Case 3: Start new move (Step 1)
         obs_tensor = self.process_obs(state)
@@ -217,7 +219,6 @@ class TransformerAgent(BaseAgent):
 
             # Check if the model's chosen 'from_idx' is actually legal.
             if from_idx not in legal_actions:
-                import numpy as np
                 fallback_action = np.random.choice(legal_actions)
                 return fallback_action.item()
 

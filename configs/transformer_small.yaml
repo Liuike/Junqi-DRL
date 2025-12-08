@@ -1,0 +1,47 @@
+# Transformer PPO Training Configuration - Small Model
+# Suitable for CPU training or quick experiments on GPU
+
+game:
+  mode: junqi_8x3  # junqi_8x3 (8x3 board) or junqi_standard (5x6 board)
+  board_variant: small
+
+training:
+  num_iterations: 5000  # Total PPO iterations
+  eval_every: 100       # Evaluate every N iterations
+  eval_episodes: 50     # Number of episodes for evaluation
+  save_dir: models/transformer  # Directory to save models
+  device: auto          # Device: cpu, cuda, or auto
+  seed: null
+
+agent:
+  type: transformer
+  # Model Architecture
+  d_model: 64           # Transformer embedding dimension
+  nhead: 4              # Number of attention heads
+  num_layers: 2         # Number of transformer layers
+  dim_feedforward: 256  # FFN dimension (4 * d_model)
+  dropout: 0.1          # Dropout rate
+  
+  # PPO Algorithm Parameters
+  lr_start: 0.0001      # Starting learning rate (1e-4)
+  lr_end: 0.000005      # Ending learning rate (5e-6)
+  gamma: 0.99           # Discount factor
+  gae_lambda: 0.95      # GAE lambda for advantage estimation
+  clip_coef: 0.2        # PPO clipping coefficient
+  vf_coef: 0.5          # Value function loss coefficient
+  ent_coef_start: 0.02  # Starting entropy coefficient
+  ent_coef_end: 0.001   # Ending entropy coefficient
+  
+  # Training Loop
+  num_steps: 512        # Steps per iteration (rollout buffer size)
+  minibatch_size: 32    # Minibatch size for PPO updates
+  update_epochs: 4      # Number of PPO update epochs per iteration
+  max_grad_norm: 0.5    # Maximum gradient norm for clipping
+
+wandb:
+  enabled: false
+  project: junqi-transformer
+  entity: null
+  run_name: transformer_small
+  tags: []
+

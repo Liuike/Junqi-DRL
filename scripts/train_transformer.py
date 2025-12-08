@@ -1,5 +1,6 @@
 import os
 import sys
+import argparse
 import numpy as np
 import torch
 import torch.nn as nn
@@ -11,31 +12,10 @@ import pyspiel
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 from junqi_drl.agents.junqi_transformer import JunqiMoveTransformer
+from junqi_drl.agents.transformer_agent import TransformerAgent
 from junqi_drl.agents.random_agent import RandomAgent
+from junqi_drl.core.metrics import MetricsLogger
 # Import game modules so pyspiel knows about registrations.
-from junqi_drl.game import junqi_8x3  # noqa: F401
-from junqi_drl.game import junqi_standard  # noqa: F401
-
-# --- Configuration ---
-GAMEMODE = "junqi_8x3"  # or "junqi_standard"
-BOARD_VARIANT = "small" if GAMEMODE == "junqi_8x3" else "standard"
-SAVE_DIR = "models_transformer"
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-# --- PPO Hyperparameters ---
-NUM_ITERATIONS = 5000
-NUM_STEPS = 512          # GPU: 2048
-MINIBATCH_SIZE = 32      # GPU: 64
-UPDATE_EPOCHS = 4
-LR_START = 1e-4
-LR_END = 5e-6
-GAMMA = 0.99
-GAE_LAMBDA = 0.95
-CLIP_COEF = 0.2
-ENT_COEF_START = 0.02
-ENT_COEF_END = 0.001
-VF_COEF = 0.5
-MAX_GRAD_NORM = 0.5
 
 
 def apply_transformer_action(state, action_int, num_cells, pass_action_env_id):
@@ -62,89 +42,126 @@ def apply_transformer_action(state, action_int, num_cells, pass_action_env_id):
     return True
 
 
-class JunqiPPOAgent(nn.Module):
-    """Wrapper holding the transformer model plus preprocessing utilities."""
+def train_transformer(
+    game_mode="junqi_8x3",
+    num_iterations=5000,
+    num_steps=512,
+    minibatch_size=32,
+    update_epochs=4,
+    d_model=64,
+    nhead=4,
+    num_layers=2,
+    dropout=0.1,
+    lr_start=1e-4,
+    lr_end=5e-6,
+    gamma=0.99,
+    gae_lambda=0.95,
+    clip_coef=0.2,
+    ent_coef_start=0.02,
+    ent_coef_end=0.001,
+    vf_coef=0.5,
+    max_grad_norm=0.5,
+    save_dir="models_transformer",
+    device="cpu",
+    eval_every=100,
+    eval_episodes=50,
+    use_wandb=False,
+    wandb_project="junqi-transformer",
+    wandb_run_name=None
+):
+    """
+    Train transformer agent with PPO.
+    
+    Args:
+        game_mode: "junqi_8x3" or "junqi_standard"
+        num_iterations: Total training iterations
+        num_steps: Steps per iteration
+        minibatch_size: Minibatch size for PPO updates
+        update_epochs: PPO update epochs per iteration
+        d_model: Transformer model dimension
+        nhead: Number of attention heads
+        num_layers: Number of transformer layers
+        dropout: Dropout rate
+        lr_start: Starting learning rate
+        lr_end: Ending learning rate
+        gamma: Discount factor
+        gae_lambda: GAE lambda parameter
+        clip_coef: PPO clip coefficient
+        ent_coef_start: Starting entropy coefficient
+        ent_coef_end: Ending entropy coefficient
+        vf_coef: Value function coefficient
+        max_grad_norm: Max gradient norm for clipping
+        save_dir: Directory to save models
+        device: "cpu" or "cuda"
+        eval_every: Evaluate every N iterations
+        eval_episodes: Number of episodes for evaluation
+        use_wandb: Enable WandB logging
+        wandb_project: WandB project name
+        wandb_run_name: WandB run name
+    """
+    os.makedirs(save_dir, exist_ok=True)
+    
+    board_variant = "small" if game_mode == "junqi_8x3" else "standard"
+    
+    # Initialize metrics logger
+    wandb_config = {
+        "project": wandb_project,
+        "name": wandb_run_name,
+        "config": {
+            "game_mode": game_mode,
+            "board_variant": board_variant,
+            "num_iterations": num_iterations,
+            "num_steps": num_steps,
+            "minibatch_size": minibatch_size,
+            "update_epochs": update_epochs,
+            "d_model": d_model,
+            "nhead": nhead,
+            "num_layers": num_layers,
+            "dropout": dropout,
+            "lr_start": lr_start,
+            "lr_end": lr_end,
+            "gamma": gamma,
+            "gae_lambda": gae_lambda,
+            "clip_coef": clip_coef,
+            "ent_coef_start": ent_coef_start,
+            "ent_coef_end": ent_coef_end,
+            "vf_coef": vf_coef,
+            "max_grad_norm": max_grad_norm,
+            "device": str(device),
+        }
+    }
+    
+    metrics_logger = MetricsLogger(
+        use_wandb=use_wandb,
+        wandb_config=wandb_config
+    )
+    
+    game = pyspiel.load_game(game_mode)
 
-    def __init__(self, board_variant, device, game):
-        super().__init__()
-        self.device = device
-        self.game = game
-        self.model = JunqiMoveTransformer(
-            board_variant=board_variant,
-            d_model=64,      # GPU: 256
-            nhead=4,         # GPU: 8
-            num_layers=2,    # GPU: 4
-            dropout=0.1,
-        ).to(device)
+    print(f"--- Starting PPO Training: {game_mode} ---")
+    print(f"Device: {device}")
 
-        self.optimizer = optim.Adam(self.model.parameters(), lr=LR_START, eps=1e-5)
-
-        self.height = self.model.height
-        self.width = self.model.width
-        self.channels = self.model.channels
-        self.num_cells = self.model.seq_len
-        self.total_actions = self.model.total_actions
-
-        self.lr_scheduler = lambda frac: LR_START + frac * (LR_END - LR_START)
-        self.ent_scheduler = lambda frac: ENT_COEF_START + frac * (ENT_COEF_END - ENT_COEF_START)
-
-    def process_obs(self, state, player_id):
-        obs_flat = state.observation_tensor(player_id)
-        obs_3d = np.array(obs_flat, dtype=np.float32).reshape(self.height, self.width, self.channels)
-        return torch.tensor(obs_3d, device=self.device).unsqueeze(0)
-
-    def process_mask(self, state, player_id):
-        """Construct a (1, S*S+1) legality mask by querying env rules."""
-        if not getattr(state, "selecting_piece", True):
-            raise RuntimeError("Mask requested while environment expects destination choice.")
-
-        full_mask = np.zeros(self.total_actions, dtype=np.float32)
-        env_legal_actions = state.legal_actions(player_id)
-        pass_env_id = self.game.num_distinct_actions() - 1
-
-        if pass_env_id in env_legal_actions:
-            full_mask[-1] = 1.0
-            if len(env_legal_actions) == 1:
-                return torch.tensor(full_mask, dtype=torch.float32, device=self.device).unsqueeze(0)
-
-        decode_action = state.decode_action
-        for from_idx in env_legal_actions:
-            if from_idx == pass_env_id or from_idx >= self.num_cells:
-                continue
-            row, col = decode_action[from_idx]
-            try:
-                destinations = state._get_legal_destinations([row, col], player_id)
-            except AttributeError:
-                destinations = []
-            for r_to, c_to in destinations:
-                to_idx = r_to * self.width + c_to
-                flat_idx = from_idx * self.num_cells + to_idx
-                full_mask[flat_idx] = 1.0
-
-        return torch.tensor(full_mask, dtype=torch.float32, device=self.device).unsqueeze(0)
-
-    def update_parameters(self, frac):
-        new_lr = self.lr_scheduler(frac)
-        new_ent = self.ent_scheduler(frac)
-        for param_group in self.optimizer.param_groups:
-            param_group["lr"] = new_lr
-        return new_lr, new_ent
-
-
-def train():
-    os.makedirs(SAVE_DIR, exist_ok=True)
-    game = pyspiel.load_game(GAMEMODE)
-
-    print(f"--- Starting PPO Training: {GAMEMODE} ---")
-    print(f"Device: {DEVICE}")
-
-    agent = JunqiPPOAgent(BOARD_VARIANT, DEVICE, game)
+    agent = TransformerAgent(
+        player_id=0,
+        board_variant=board_variant,
+        device=device,
+        d_model=d_model,
+        nhead=nhead,
+        num_layers=num_layers,
+        dropout=dropout,
+        game=game,
+        lr_start=lr_start,
+        lr_end=lr_end,
+        ent_coef_start=ent_coef_start,
+        ent_coef_end=ent_coef_end,
+        training_mode=True
+    )
     eval_opponent = RandomAgent(player_id=1)
     best_win_rate = 0.0
     pass_action_env_id = game.num_distinct_actions() - 1
 
-    for iteration in range(1, NUM_ITERATIONS + 1):
-        frac = (iteration - 1.0) / NUM_ITERATIONS
+    for iteration in range(1, num_iterations + 1):
+        frac = (iteration - 1.0) / num_iterations
         current_lr, current_ent_coef = agent.update_parameters(frac)
 
         obs_buffer, mask_buffer = [], []
@@ -154,7 +171,7 @@ def train():
         state = game.new_initial_state()
         steps_collected = 0
 
-        while steps_collected < NUM_STEPS:
+        while steps_collected < num_steps:
             if state.is_terminal():
                 state = game.new_initial_state()
                 continue
@@ -191,8 +208,8 @@ def train():
             action_buffer.append(action)
             logprob_buffer.append(logprob)
             value_buffer.append(value)
-            reward_buffer.append(torch.tensor(step_reward, device=DEVICE))
-            done_buffer.append(torch.tensor(state.is_terminal(), dtype=torch.float32, device=DEVICE))
+            reward_buffer.append(torch.tensor(step_reward, device=device))
+            done_buffer.append(torch.tensor(state.is_terminal(), dtype=torch.float32, device=device))
 
             steps_collected += 1
 
@@ -212,15 +229,15 @@ def train():
 
         advantages = torch.zeros_like(rewards)
         lastgaelam = 0.0
-        for t in reversed(range(NUM_STEPS)):
-            if t == NUM_STEPS - 1:
+        for t in reversed(range(num_steps)):
+            if t == num_steps - 1:
                 nextnonterminal = 1.0 - dones[t]
                 nextvalues = next_value
             else:
                 nextnonterminal = 1.0 - dones[t]
                 nextvalues = values[t + 1]
-            delta = rewards[t] + GAMMA * nextvalues * nextnonterminal - values[t]
-            advantages[t] = lastgaelam = delta + GAMMA * GAE_LAMBDA * nextnonterminal * lastgaelam
+            delta = rewards[t] + gamma * nextvalues * nextnonterminal - values[t]
+            advantages[t] = lastgaelam = delta + gamma * gae_lambda * nextnonterminal * lastgaelam
 
         returns = advantages + values
 
@@ -231,11 +248,11 @@ def train():
         b_advantages = advantages.view(-1)
         b_returns = returns.view(-1)
 
-        b_inds = np.arange(NUM_STEPS)
-        for epoch in range(UPDATE_EPOCHS):
+        b_inds = np.arange(num_steps)
+        for epoch in range(update_epochs):
             np.random.shuffle(b_inds)
-            for start in range(0, NUM_STEPS, MINIBATCH_SIZE):
-                end = start + MINIBATCH_SIZE
+            for start in range(0, num_steps, minibatch_size):
+                end = start + minibatch_size
                 mb_inds = b_inds[start:end]
 
                 logits, newvalue = agent.model(b_obs[mb_inds], mask=b_masks[mb_inds])
@@ -251,17 +268,17 @@ def train():
                 mb_adv = (mb_adv - mb_adv.mean()) / (mb_adv.std() + 1e-8)
 
                 pg_loss1 = -mb_adv * ratio
-                pg_loss2 = -mb_adv * torch.clamp(ratio, 1 - CLIP_COEF, 1 + CLIP_COEF)
+                pg_loss2 = -mb_adv * torch.clamp(ratio, 1 - clip_coef, 1 + clip_coef)
                 pg_loss = torch.max(pg_loss1, pg_loss2).mean()
 
                 v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
                 entropy_loss = entropy.mean()
 
-                loss = pg_loss - current_ent_coef * entropy_loss + VF_COEF * v_loss
+                loss = pg_loss - current_ent_coef * entropy_loss + vf_coef * v_loss
 
                 agent.optimizer.zero_grad()
                 loss.backward()
-                nn.utils.clip_grad_norm_(agent.model.parameters(), MAX_GRAD_NORM)
+                nn.utils.clip_grad_norm_(agent.model.parameters(), max_grad_norm)
                 agent.optimizer.step()
 
         if iteration % 20 == 0:
@@ -269,12 +286,23 @@ def train():
                 f"Iter {iteration} | Loss {loss.item():.4f} | "
                 f"Adv {advantages.mean().item():.3f} | LR {current_lr:.2e}"
             )
+            
+            # Log training metrics
+            metrics_logger.log({
+                "iteration": iteration,
+                "loss": loss.item(),
+                "pg_loss": pg_loss.item(),
+                "v_loss": v_loss.item(),
+                "entropy_loss": entropy_loss.item(),
+                "advantages_mean": advantages.mean().item(),
+                "learning_rate": current_lr,
+                "entropy_coef": current_ent_coef
+            }, step=iteration)
 
-        if iteration % 100 == 0:
+        if iteration % eval_every == 0:
             agent.model.eval()
             eval_wins = 0
-            num_eval_games = 50
-            for _ in range(num_eval_games):
+            for _ in range(eval_episodes):
                 s = game.new_initial_state()
                 while not s.is_terminal():
                     p = s.current_player()
@@ -296,18 +324,132 @@ def train():
                     eval_wins += 1
 
             agent.model.train()
-            win_rate = eval_wins / num_eval_games
+            win_rate = eval_wins / eval_episodes
             print(f"\n>>> Eval @ Iter {iteration}: Win rate vs Random = {win_rate:.2%}")
+            
+            # Log evaluation metrics
+            metrics_logger.log({
+                "eval_vs_random_winrate": win_rate
+            }, step=iteration)
+            
             if win_rate >= best_win_rate:
                 best_win_rate = win_rate
-                os.makedirs(SAVE_DIR, exist_ok=True)
-                save_path = os.path.join(SAVE_DIR, f"transformer_best_wr{win_rate:.2f}.pth")
+                save_path = os.path.join(save_dir, f"transformer_best_wr{win_rate:.2f}_iter{iteration}.pth")
                 torch.save(agent.model.state_dict(), save_path)
-                print(f"Saved new best model to {save_path}")
+                print(f"✓ Saved new best model to {save_path}")
+                
+                metrics_logger.log({
+                    "best_eval_winrate": best_win_rate
+                }, step=iteration)
 
-    torch.save(agent.model.state_dict(), os.path.join(SAVE_DIR, "transformer_final.pth"))
+    torch.save(agent.model.state_dict(), os.path.join(save_dir, "transformer_final.pth"))
     print("Training Complete.")
+    print(f"Best win rate vs random: {best_win_rate:.2%}")
+    
+    metrics_logger.finish()
 
 
 if __name__ == "__main__":
-    train()
+    parser = argparse.ArgumentParser(description="Train Transformer agent with PPO")
+    parser.add_argument("--game_mode", type=str, default="junqi_8x3",
+                        choices=["junqi_8x3", "junqi_standard"],
+                        help="Game variant to train on")
+    parser.add_argument("--num_iterations", type=int, default=5000,
+                        help="Total training iterations")
+    parser.add_argument("--num_steps", type=int, default=512,
+                        help="Steps per iteration")
+    parser.add_argument("--minibatch_size", type=int, default=32,
+                        help="Minibatch size for PPO updates")
+    parser.add_argument("--update_epochs", type=int, default=4,
+                        help="PPO update epochs per iteration")
+    parser.add_argument("--d_model", type=int, default=64,
+                        help="Transformer model dimension")
+    parser.add_argument("--nhead", type=int, default=4,
+                        help="Number of attention heads")
+    parser.add_argument("--num_layers", type=int, default=2,
+                        help="Number of transformer layers")
+    parser.add_argument("--dropout", type=float, default=0.1,
+                        help="Dropout rate")
+    parser.add_argument("--lr_start", type=float, default=1e-4,
+                        help="Starting learning rate")
+    parser.add_argument("--lr_end", type=float, default=5e-6,
+                        help="Ending learning rate")
+    parser.add_argument("--gamma", type=float, default=0.99,
+                        help="Discount factor")
+    parser.add_argument("--gae_lambda", type=float, default=0.95,
+                        help="GAE lambda parameter")
+    parser.add_argument("--clip_coef", type=float, default=0.2,
+                        help="PPO clip coefficient")
+    parser.add_argument("--ent_coef_start", type=float, default=0.02,
+                        help="Starting entropy coefficient")
+    parser.add_argument("--ent_coef_end", type=float, default=0.001,
+                        help="Ending entropy coefficient")
+    parser.add_argument("--vf_coef", type=float, default=0.5,
+                        help="Value function coefficient")
+    parser.add_argument("--max_grad_norm", type=float, default=0.5,
+                        help="Max gradient norm for clipping")
+    parser.add_argument("--save_dir", type=str, default="models_transformer",
+                        help="Directory to save models")
+    parser.add_argument("--device", type=str, default="auto",
+                        help="Device: 'cpu', 'cuda', or 'auto'")
+    parser.add_argument("--eval_every", type=int, default=100,
+                        help="Evaluate every N iterations")
+    parser.add_argument("--eval_episodes", type=int, default=50,
+                        help="Number of episodes for evaluation")
+    parser.add_argument("--wandb", action="store_true",
+                        help="Enable WandB logging")
+    parser.add_argument("--wandb_project", type=str, default="junqi-transformer",
+                        help="WandB project name")
+    parser.add_argument("--wandb_run_name", type=str, default=None,
+                        help="WandB run name")
+    
+    args = parser.parse_args()
+    
+    # Auto-detect device
+    if args.device == "auto":
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    else:
+        device = torch.device(args.device)
+    
+    print("=" * 60)
+    print("Transformer PPO Training Configuration")
+    print("=" * 60)
+    print(f"Game Mode: {args.game_mode}")
+    print(f"Device: {device}")
+    print(f"Iterations: {args.num_iterations}")
+    print(f"Steps per Iteration: {args.num_steps}")
+    print(f"Model Dimension: {args.d_model}")
+    print(f"Attention Heads: {args.nhead}")
+    print(f"Transformer Layers: {args.num_layers}")
+    print(f"Learning Rate: {args.lr_start} → {args.lr_end}")
+    print(f"WandB Enabled: {args.wandb}")
+    print("=" * 60)
+    print()
+    
+    train_transformer(
+        game_mode=args.game_mode,
+        num_iterations=args.num_iterations,
+        num_steps=args.num_steps,
+        minibatch_size=args.minibatch_size,
+        update_epochs=args.update_epochs,
+        d_model=args.d_model,
+        nhead=args.nhead,
+        num_layers=args.num_layers,
+        dropout=args.dropout,
+        lr_start=args.lr_start,
+        lr_end=args.lr_end,
+        gamma=args.gamma,
+        gae_lambda=args.gae_lambda,
+        clip_coef=args.clip_coef,
+        ent_coef_start=args.ent_coef_start,
+        ent_coef_end=args.ent_coef_end,
+        vf_coef=args.vf_coef,
+        max_grad_norm=args.max_grad_norm,
+        save_dir=args.save_dir,
+        device=device,
+        eval_every=args.eval_every,
+        eval_episodes=args.eval_episodes,
+        use_wandb=args.wandb,
+        wandb_project=args.wandb_project,
+        wandb_run_name=args.wandb_run_name
+    )

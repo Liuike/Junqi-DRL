@@ -1,0 +1,42 @@
+# DRQN Training Configuration - Spatial Network
+# Train spatial DRQN on junqi_8x3 board
+
+game:
+  mode: junqi_8x3
+  board_variant: small
+
+training:
+  num_episodes: 5000
+  num_iterations: 5000  # Not used for DRQN but required by config
+  eval_every: 1000
+  eval_episodes: 100
+  save_dir: models/drqn
+  device: auto  # auto, cpu, or cuda
+  seed: null
+  
+agent:
+  type: drqn
+  network_type: spatial  # flat or spatial
+  hidden_size: 256
+  lr: 0.0005
+  gamma: 0.99
+  epsilon_start: 1.0
+  epsilon_min: 0.05
+  epsilon_decay: 0.9995
+  batch_size: 64
+  replay_buffer_size: 100000
+  use_stratified_buffer: true
+  num_segments: 4
+  target_update_freq: 300
+  opponent_update_freq: 500
+
+wandb:
+  enabled: false
+  project: junqi-drql
+  entity: null
+  run_name: spatial_drqn_8x3
+  tags:
+    - spatial
+    - junqi_8x3
+    - self-play
+

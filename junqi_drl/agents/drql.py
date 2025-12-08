@@ -3,96 +3,12 @@ import torch.nn as nn
 import torch.optim as optim
 import random
 import numpy as np
+from typing import List, Optional, Dict, Any
 from collections import deque
 
-
-class TemporalStratifiedReplayBuffer:
-    """
-    Temporal stratified replay buffer that divides the buffer into time segments
-    and samples proportionally from each segment to ensure early experiences are represented.
-    """
-    def __init__(self, maxlen=100000, num_segments=4):
-        """
-        Args:
-            maxlen: Maximum buffer size
-            num_segments: Number of temporal segments to divide the buffer into
-        """
-        self.maxlen = maxlen
-        self.num_segments = num_segments
-        self.segment_size = maxlen // num_segments
-        
-        # Create separate deques for each temporal segment
-        self.segments = [deque(maxlen=self.segment_size) for _ in range(num_segments)]
-        self.current_segment = 0
-        self.total_added = 0
-        
-    def append(self, transition):
-        """
-        Add transition to the current segment.
-        Advances to next segment when current is full.
-        """
-        self.segments[self.current_segment].append(transition)
-        self.total_added += 1
-        
-        # Move to next segment in round-robin fashion when segment is full
-        if len(self.segments[self.current_segment]) >= self.segment_size:
-            self.current_segment = (self.current_segment + 1) % self.num_segments
-    
-    def sample(self, batch_size):
-        """
-        Sample uniformly from all temporal segments.
-        Each segment contributes proportionally to its size.
-        """
-        batch = []
-        
-        # Count non-empty segments
-        non_empty_segments = [seg for seg in self.segments if len(seg) > 0]
-        
-        if not non_empty_segments:
-            return batch
-        
-        # Calculate samples per segment (uniform across non-empty segments)
-        samples_per_segment = batch_size // len(non_empty_segments)
-        remainder = batch_size % len(non_empty_segments)
-        
-        for i, segment in enumerate(non_empty_segments):
-            # Add extra sample to first 'remainder' segments to reach exact batch_size
-            n_samples = samples_per_segment + (1 if i < remainder else 0)
-            n_samples = min(n_samples, len(segment))
-            
-            batch.extend(random.sample(list(segment), n_samples))
-        
-        # If we still don't have enough, sample with replacement from all segments
-        if len(batch) < batch_size:
-            all_transitions = []
-            for segment in non_empty_segments:
-                all_transitions.extend(list(segment))
-            
-            if all_transitions:
-                remaining = batch_size - len(batch)
-                batch.extend(random.choices(all_transitions, k=remaining))
-        
-        return batch
-    
-    def __len__(self):
-        """Total number of transitions across all segments."""
-        return sum(len(seg) for seg in self.segments)
-    
-    def get_stats(self):
-        """Return statistics about buffer composition."""
-        stats = {
-            'total': len(self),
-            'segments': []
-        }
-        
-        for i, segment in enumerate(self.segments):
-            stats['segments'].append({
-                'id': i,
-                'size': len(segment),
-                'is_current': i == self.current_segment
-            })
-        
-        return stats
+from .base_agent import BaseAgent
+from ..core.replay_buffer import ReplayBuffer, TemporalStratifiedReplayBuffer
+from ..utils.observation import get_board_config, process_observation
 
 class DRQNetwork(nn.Module):
     def __init__(self, obs_dim, action_dim, hidden_size=256):
@@ -125,29 +41,167 @@ class DRQNetwork(nn.Module):
         return torch.zeros(1, batch_size, self.hidden_size, device=device)
 
 
-class DRQLAgent:
-    def __init__(self, player_id, obs_dim, action_dim, lr=5e-4, gamma=0.99, 
-                 epsilon=1.0, device="cpu", hidden_size=256, use_stratified_buffer=True, num_segments=4):
-        self.player_id = player_id
-        self.obs_dim = obs_dim
+class SpatialDRQNetwork(nn.Module):
+    """
+    Spatial-aware DRQN using CNN + GRU.
+    Processes (H, W, C) observations with convolutional layers before recurrent processing.
+    """
+    def __init__(self, board_config: Dict[str, int], action_dim: int, hidden_size: int = 256):
+        super().__init__()
+        self.height = board_config['height']
+        self.width = board_config['width']
+        self.channels = board_config['channels']
+        self.hidden_size = hidden_size
+        self.action_dim = action_dim
+        
+        # Spatial feature extractor (CNN)
+        # Input: (B, C, H, W) - PyTorch conv expects channels-first
+        self.conv1 = nn.Conv2d(self.channels, 64, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
+        self.conv3 = nn.Conv2d(128, 128, kernel_size=3, padding=1)
+        
+        # Calculate flattened size after convs (no pooling, same spatial dims)
+        self.conv_output_size = self.height * self.width * 128
+        
+        # Recurrent processing
+        self.fc_pre_gru = nn.Linear(self.conv_output_size, hidden_size)
+        self.gru = nn.GRU(input_size=hidden_size, hidden_size=hidden_size, batch_first=True)
+        
+        # Q-value head
+        self.fc_post_gru = nn.Linear(hidden_size, hidden_size)
+        self.q_head = nn.Linear(hidden_size, action_dim)
+        
+        self.relu = nn.ReLU()
+        self.layer_norm = nn.LayerNorm(hidden_size)
+    
+    def forward(self, obs_seq, hidden=None):
+        """
+        Args:
+            obs_seq: (B, T, H, W, C) or (B, 1, H, W, C)
+            hidden: GRU hidden state
+            
+        Returns:
+            q_values: (B, T, action_dim)
+            hidden: Updated GRU hidden state
+        """
+        batch_size, seq_len = obs_seq.shape[0], obs_seq.shape[1]
+        
+        # Reshape for CNN: (B*T, C, H, W)
+        obs_flat = obs_seq.reshape(batch_size * seq_len, self.height, self.width, self.channels)
+        obs_flat = obs_flat.permute(0, 3, 1, 2)  # (B*T, C, H, W)
+        
+        # Convolutional feature extraction
+        x = self.relu(self.conv1(obs_flat))  # (B*T, 64, H, W)
+        x = self.relu(self.conv2(x))         # (B*T, 128, H, W)
+        x = self.relu(self.conv3(x))         # (B*T, 128, H, W)
+        
+        # Flatten spatial dims
+        x = x.reshape(batch_size * seq_len, -1)  # (B*T, conv_output_size)
+        
+        # Pre-GRU processing
+        x = self.relu(self.fc_pre_gru(x))  # (B*T, hidden_size)
+        x = self.layer_norm(x)
+        
+        # Reshape back for GRU: (B, T, hidden_size)
+        x = x.reshape(batch_size, seq_len, self.hidden_size)
+        
+        # Recurrent processing
+        gru_out, hidden = self.gru(x, hidden)  # (B, T, hidden_size)
+        
+        # Q-value head
+        x = self.relu(self.fc_post_gru(gru_out))  # (B, T, hidden_size)
+        q_values = self.q_head(x)  # (B, T, action_dim)
+        
+        return q_values, hidden
+    
+    def init_hidden(self, batch_size=1, device="cpu"):
+        return torch.zeros(1, batch_size, self.hidden_size, device=device)
+
+
+class DRQLAgent(BaseAgent):
+    """
+    Deep Recurrent Q-Learning agent with support for flat and spatial networks.
+    
+    Supports two network architectures:
+    - "flat": Traditional MLP (legacy, flattens spatial structure)
+    - "spatial": CNN + GRU (preserves spatial structure, recommended)
+    """
+    def __init__(
+        self, 
+        player_id: int,
+        obs_dim: Optional[int] = None,  # For backward compatibility with flat network
+        action_dim: int = None,
+        game_mode: str = "junqi_8x3",  # For spatial networks
+        network_type: str = "flat",
+        lr: float = 5e-4,
+        gamma: float = 0.99, 
+        epsilon: float = 1.0,
+        epsilon_decay: float = 0.9995,
+        epsilon_min: float = 0.20,
+        device: str = "cpu",
+        hidden_size: int = 256,
+        use_stratified_buffer: bool = True,
+        num_segments: int = 4
+    ):
+        """
+        Initialize DRQN agent.
+        
+        Args:
+            player_id: Player ID (0 or 1)
+            obs_dim: Observation dimension (only for flat network, deprecated)
+            action_dim: Number of actions
+            game_mode: Game mode for spatial networks ("junqi_8x3" or "junqi_standard")
+            network_type: "flat" or "spatial"
+            lr: Learning rate
+            gamma: Discount factor
+            epsilon: Initial exploration rate
+            epsilon_decay: Epsilon decay factor per episode
+            epsilon_min: Minimum epsilon value
+            device: PyTorch device
+            hidden_size: Hidden layer size
+            use_stratified_buffer: Use temporal stratified replay buffer
+            num_segments: Number of segments for stratified buffer
+        """
+        super().__init__(player_id, device)
+        
+        self.network_type = network_type
+        self.game_mode = game_mode
         self.action_dim = action_dim
         self.gamma = gamma
         self.epsilon = epsilon
-        self.epsilon_decay = 0.9995 
-        self.epsilon_min = 0.20
-        self.device = device
+        self.epsilon_decay = epsilon_decay
+        self.epsilon_min = epsilon_min
+        self.hidden_size = hidden_size
 
-        self.q_net = DRQNetwork(obs_dim, action_dim, hidden_size).to(device)
-        self.target_net = DRQNetwork(obs_dim, action_dim, hidden_size).to(device)
+        # Get board config for spatial networks
+        if network_type == "spatial":
+            self.board_config = get_board_config(game_mode)
+            self.obs_dim = None  # Not used for spatial networks
+        else:
+            self.obs_dim = obs_dim
+            self.board_config = None
+
+        # Create Q-network and target network based on type
+        if network_type == "flat":
+            if obs_dim is None:
+                raise ValueError("obs_dim required for flat network")
+            self.q_net = DRQNetwork(obs_dim, action_dim, hidden_size).to(device)
+            self.target_net = DRQNetwork(obs_dim, action_dim, hidden_size).to(device)
+        elif network_type == "spatial":
+            self.q_net = SpatialDRQNetwork(self.board_config, action_dim, hidden_size).to(device)
+            self.target_net = SpatialDRQNetwork(self.board_config, action_dim, hidden_size).to(device)
+        else:
+            raise ValueError(f"Unknown network_type: {network_type}. Expected 'flat' or 'spatial'")
+        
         self.target_net.load_state_dict(self.q_net.state_dict())
         self.optimizer = optim.Adam(self.q_net.parameters(), lr=lr)
         self.loss_fn = nn.SmoothL1Loss()  # Huber loss is more stable
 
-        # Use temporal stratified buffer or regular deque
+        # Use temporal stratified buffer or regular buffer
         if use_stratified_buffer:
             self.replay_buffer = TemporalStratifiedReplayBuffer(maxlen=1000000, num_segments=num_segments)
         else:
-            self.replay_buffer = deque(maxlen=100000)
+            self.replay_buffer = ReplayBuffer(maxlen=100000)
         self.use_stratified_buffer = use_stratified_buffer
         
         self.hidden = None
@@ -155,14 +209,48 @@ class DRQLAgent:
         # For tracking statistics
         self.episode_rewards = []
 
-    def reset_hidden(self):
+    def reset(self):
+        """Reset hidden state (implements BaseAgent.reset)."""
         self.hidden = self.q_net.init_hidden(device=self.device)
+    
+    # Keep old method name for backward compatibility
+    def reset_hidden(self):
+        """Deprecated: use reset() instead."""
+        self.reset()
 
     def get_obs(self, state):
-        obs = np.array(state.observation_tensor(self.player_id), dtype=np.float32)
-        return torch.tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0).unsqueeze(0)
+        """Get observation tensor from game state."""
+        if self.network_type == "flat":
+            # Legacy flat observation
+            obs = np.array(state.observation_tensor(self.player_id), dtype=np.float32)
+            return torch.tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0).unsqueeze(0)
+        else:
+            # Spatial observation for CNN networks
+            return process_observation(
+                state,
+                self.player_id,
+                self.board_config,
+                device=self.device,
+                format="spatial",
+                add_batch_dim=True,
+                add_seq_dim=True
+            )
 
-    def choose_action(self, state, legal_actions, eval_mode=False):
+    def choose_action(self, state, legal_actions: Optional[List[int]] = None, eval_mode: bool = False) -> int:
+        """
+        Choose action (implements BaseAgent.choose_action).
+        
+        Args:
+            state: Game state
+            legal_actions: List of legal actions (will be computed if None)
+            eval_mode: If True, use greedy action selection
+            
+        Returns:
+            Action index
+        """
+        if legal_actions is None:
+            legal_actions = state.legal_actions(self.player_id)
+        
         epsilon = 0.0 if eval_mode else self.epsilon
         
         if random.random() < epsilon:
@@ -179,6 +267,7 @@ class DRQLAgent:
         return masked_q.argmax().item()
 
     def store_transition(self, obs, action, reward, next_obs, done):
+        """Store transition in replay buffer."""
         self.replay_buffer.append((obs, action, reward, next_obs, done))
 
     def train(self, batch_size=64):
@@ -271,15 +360,34 @@ class DRQLAgent:
     def update_target(self):
         self.target_net.load_state_dict(self.q_net.state_dict())
 
-    def save(self, path):
-        torch.save({
+    def save(self, path: str):
+        """
+        Save agent checkpoint (implements BaseAgent.save).
+        
+        Args:
+            path: File path to save checkpoint
+        """
+        checkpoint = {
             'q_net': self.q_net.state_dict(),
             'target_net': self.target_net.state_dict(),
             'optimizer': self.optimizer.state_dict(),
-            'epsilon': self.epsilon
-        }, path)
+            'epsilon': self.epsilon,
+            'network_type': self.network_type,
+            'game_mode': self.game_mode,
+            'action_dim': self.action_dim,
+            'hidden_size': self.hidden_size,
+            'player_id': self.player_id,
+            'obs_dim': self.obs_dim,  # For backward compatibility
+        }
+        torch.save(checkpoint, path)
 
-    def load(self, path):
+    def load(self, path: str):
+        """
+        Load agent checkpoint (implements BaseAgent.load).
+        
+        Args:
+            path: File path to load checkpoint from
+        """
         checkpoint = torch.load(path, map_location=self.device)
         self.q_net.load_state_dict(checkpoint['q_net'])
         self.target_net.load_state_dict(checkpoint['target_net'])
@@ -287,3 +395,10 @@ class DRQLAgent:
             self.optimizer.load_state_dict(checkpoint['optimizer'])
         if 'epsilon' in checkpoint:
             self.epsilon = checkpoint['epsilon']
+        
+        # Load network metadata for compatibility checks
+        if 'network_type' in checkpoint:
+            loaded_network_type = checkpoint['network_type']
+            if loaded_network_type != self.network_type:
+                print(f"Warning: Loading checkpoint with network_type={loaded_network_type} "
+                      f"into agent with network_type={self.network_type}")

@@ -1,7 +1,3 @@
-"""
-Autoplay example: Two random agents playing against each other.
-Logs game moves to a file.
-"""
 import sys
 from pathlib import Path
 from datetime import datetime

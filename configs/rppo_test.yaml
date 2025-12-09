@@ -1,0 +1,42 @@
+# RPPO Debug / Sanity Test Configuration (very fast)
+game:
+  mode: junqi_8x3
+  board_variant: small
+
+training:
+  num_episodes: 30 # very small for quick testing
+  num_iterations: 30
+  eval_every: 10
+  eval_episodes: 5
+  save_dir: models/rppo_test
+  device: auto
+  seed: 42
+
+agent:
+  type: rppo
+
+  # RPPO hyperparameters (same as full training, just fewer episodes)
+  lr: 0.0003
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_eps: 0.2
+  k_epochs: 2 # fewer epochs to speed up small tests
+  value_coef: 0.5
+  entropy_coef: 0.01
+  max_grad_norm: 0.5
+
+  # Network
+  hidden_size: 128 # small network for extremely quick runs
+
+  # Training
+  batch_size: 16
+
+wandb:
+  enabled: false # disable for minimal overhead
+  project: junqi-rppo
+  entity: null
+  run_name: rppo_test_run
+  tags:
+    - test
+    - rppo
+    - quick

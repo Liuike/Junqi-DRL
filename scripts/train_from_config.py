@@ -8,6 +8,7 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from junqi_drl.core.config import Config
 from scripts.train_dqrl import train_drql
 from scripts.train_transformer import train_transformer
+from scripts.train_rppo import train_rppo 
 
 
 def main():
@@ -180,8 +181,54 @@ def main():
             wandb_project=config.wandb.project,
             wandb_run_name=config.wandb.run_name
         )
+
+    elif config.agent_type == "rppo":
+        agent_cfg = config.agent_config
+
+        # Print configuration
+        print("\n" + "=" * 60)
+        print("RPPO Training Configuration")
+        print("=" * 60)
+        print(f"Game Mode: {config.game.mode}")
+        print(f"Device: {device}")
+        print(f"Episodes: {config.training.num_episodes}")
+        print(f"Learning Rate: {agent_cfg.lr}")
+        print(f"Gamma: {agent_cfg.gamma}")
+        print(f"GAE Lambda: {agent_cfg.gae_lambda}")
+        print(f"Clip Eps: {agent_cfg.clip_eps}")
+        print(f"Value Coef: {agent_cfg.value_coef}")
+        print(f"Entropy Coef: {agent_cfg.entropy_coef}")
+        print(f"Hidden Size: {agent_cfg.hidden_size}")
+        print(f"Batch Size: {agent_cfg.batch_size}")
+        print(f"WandB Enabled: {config.wandb.enabled}")
+        print(f"WandB Project: {config.wandb.project}")
+        print(f"WandB Run Name: {config.wandb.run_name}")
+        print("=" * 60 + "\n")
+
+        # Call RPPO trainer
+        train_rppo(
+            num_episodes=config.training.num_episodes,
+            eval_every=config.training.eval_every,
+            eval_episodes=config.training.eval_episodes,
+            save_dir=config.training.save_dir,
+            device=device,
+            use_wandb=config.wandb.enabled,
+            wandb_project=config.wandb.project,
+            wandb_run_name=config.wandb.run_name,
+            lr=agent_cfg.lr,
+            gamma=agent_cfg.gamma,
+            gae_lambda=agent_cfg.gae_lambda,
+            clip_eps=agent_cfg.clip_eps,
+            k_epochs=agent_cfg.k_epochs,
+            value_coef=agent_cfg.value_coef,
+            entropy_coef=agent_cfg.entropy_coef,
+            max_grad_norm=agent_cfg.max_grad_norm,
+            hidden_size=agent_cfg.hidden_size,
+            batch_size=agent_cfg.batch_size,
+        )
+
     else:
-        raise ValueError(f"Unknown agent type: {config.agent_type}. Must be 'drqn' or 'transformer'")
+        raise ValueError(f"Unknown agent type: {config.agent_type}. Must be 'drqn', 'transformer', or 'rppo'")
 
 
 if __name__ == "__main__":

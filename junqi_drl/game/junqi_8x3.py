@@ -9,7 +9,7 @@ import numpy as np
 import pyspiel
 
 _NUM_PLAYERS = 2
-_NUM_MAX_PEACE_STEP = 30  # Reduced for smaller board
+_NUM_MAX_PEACE_STEP = 800  # Reduced for smaller board
 _NUM_ROWS = 8   # 8 rows total: P0 top (0-3), P1 bottom (4-7)
 _NUM_COLS = 3
 _NUM_CELLS = _NUM_ROWS * _NUM_COLS

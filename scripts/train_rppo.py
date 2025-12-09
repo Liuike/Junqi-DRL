@@ -91,6 +91,17 @@ def train_rppo(
     use_wandb: bool = True,
     wandb_project: str = "junqi-rppo",
     wandb_run_name: str | None = None,
+    # RPPO hyperparameters
+    lr: float = 3e-4,
+    gamma: float = 0.99,
+    gae_lambda: float = 0.95,
+    clip_eps: float = 0.2,
+    k_epochs: int = 4,
+    value_coef: float = 0.5,
+    entropy_coef: float = 0.01,
+    max_grad_norm: float = 0.5,
+    hidden_size: int = 256,
+    batch_size: int = 64,
 ):
     os.makedirs(save_dir, exist_ok=True)
 
@@ -125,16 +136,16 @@ def train_rppo(
         player_id=0,
         obs_dim=obs_dim,
         action_dim=action_dim,
-        lr=3e-4,
-        gamma=0.99,
-        gae_lambda=0.95,
-        clip_eps=0.2,
-        k_epochs=4,
-        value_coef=0.5,
-        entropy_coef=0.01,
-        max_grad_norm=0.5,
+        lr=lr,
+        gamma=gamma,
+        gae_lambda=gae_lambda,
+        clip_eps=clip_eps,
+        k_epochs=k_epochs,
+        value_coef=value_coef,
+        entropy_coef=entropy_coef,
+        max_grad_norm=max_grad_norm,
         device=device,
-        hidden_size=256,
+        hidden_size=hidden_size,
     )
 
     # Opponent: simple random agent on player 1
@@ -198,7 +209,7 @@ def train_rppo(
             rppo_agent.store_transition(obs, action, discounted_reward, next_obs, done)
 
         # Perform PPO update after every episode
-        metrics = rppo_agent.train(batch_size=64)
+        metrics = rppo_agent.train(batch_size=batch_size)
         if metrics is None:
             print(f"Episode {episode}: no update (not enough data)")
         else:

@@ -83,6 +83,26 @@ class TransformerConfig:
     update_epochs: int = 4
     max_grad_norm: float = 0.5
 
+@dataclass
+class RPPOConfig:
+    """Recurrent PPO (RPPO) hyperparameters."""
+    # RL hyperparameters
+    lr: float = 3e-4
+    gamma: float = 0.99
+    gae_lambda: float = 0.95
+    clip_eps: float = 0.2
+    k_epochs: int = 4
+    value_coef: float = 0.5
+    entropy_coef: float = 0.01
+    max_grad_norm: float = 0.5
+
+    # Network
+    hidden_size: int = 256
+
+    # Training
+    batch_size: int = 64
+
+
 
 @dataclass
 class WandbConfig:
@@ -133,6 +153,8 @@ class Config:
                 self.agent_config = DRQNConfig()
             elif agent_type == "transformer":
                 self.agent_config = TransformerConfig()
+            elif agent_type == "rppo":
+                self.agent_config = RPPOConfig()
             else:
                 self.agent_config = {}
     
@@ -170,6 +192,8 @@ class Config:
             agent_config = DRQNConfig(**{k: v for k, v in agent_data.items() if k != 'type'})
         elif agent_type == 'transformer':
             agent_config = TransformerConfig(**{k: v for k, v in agent_data.items() if k != 'type'})
+        elif agent_type == 'rppo':
+            agent_config = RPPOConfig(**{k: v for k, v in agent_data.items() if k != 'type'})
         else:
             agent_config = agent_data
         
@@ -195,7 +219,7 @@ class Config:
             'agent_type': self.agent_type
         }
         
-        if isinstance(self.agent_config, (DRQNConfig, TransformerConfig)):
+        if isinstance(self.agent_config, (DRQNConfig, TransformerConfig, RPPOConfig)):
             result['agent'] = asdict(self.agent_config)
         else:
             result['agent'] = self.agent_config

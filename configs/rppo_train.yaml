@@ -1,0 +1,45 @@
+# RPPO Training Configuration - Production Training
+
+game:
+  mode: junqi_8x3
+  board_variant: small
+
+training:
+  # RPPO uses episodes; num_iterations is kept for consistency but unused
+  num_episodes: 10000
+  num_iterations: 10000
+  eval_every: 500
+  eval_episodes: 200
+  save_dir: models/rppo_full
+  device: auto # auto, cpu, or cuda
+  seed: null
+
+agent:
+  type: rppo
+
+  # RPPO hyperparameters (match RPPoAgent.__init__)
+  lr: 0.0003
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_eps: 0.2
+  k_epochs: 4
+  value_coef: 0.5
+  entropy_coef: 0.01
+  max_grad_norm: 0.5
+
+  # Network
+  hidden_size: 256
+
+  # Training
+  batch_size: 64
+
+wandb:
+  enabled: true
+  project: junqi-rppo
+  entity: null
+  run_name: rppo_production_run
+  tags:
+    - production
+    - junqi_8x3
+    - rppo
+    - self-play

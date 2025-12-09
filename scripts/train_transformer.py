@@ -80,6 +80,7 @@ def train_transformer(
         minibatch_size: Minibatch size for PPO updates
         update_epochs: PPO update epochs per iteration
         d_model: Transformer model dimension
+        opponent_update_freq: Iterations between syncing opponent weights
         nhead: Number of attention heads
         num_layers: Number of transformer layers
         dropout: Dropout rate
@@ -189,6 +190,7 @@ def train_transformer(
         while steps_collected < num_steps:
             if state.is_terminal():
                 state = game.new_initial_state()
+                opponent_agent.pending_to_idx = None
                 continue
 
             player_id = state.current_player()
@@ -237,6 +239,7 @@ def train_transformer(
                         reward_buffer[-1] = torch.tensor(final_reward, device=device)
                         done_buffer[-1] = torch.tensor(1.0, dtype=torch.float32, device=device)
                     state = game.new_initial_state()
+                    opponent_agent.pending_to_idx = None
 
         with torch.no_grad():
             if state.is_terminal():
@@ -369,6 +372,7 @@ def train_transformer(
 
         if iteration % opponent_update_freq == 0:
             opponent_agent.model.load_state_dict(agent.model.state_dict())
+            opponent_agent.reset()
 
     torch.save(agent.model.state_dict(), os.path.join(save_dir, "transformer_final.pth"))
     print("Training Complete.")

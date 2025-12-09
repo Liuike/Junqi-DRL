@@ -192,21 +192,22 @@ def train_rppo(
         else:
             final_reward_p0 = raw_reward  # +1 or -1
 
-        # Assign discounted reward to each P0 step
-        gamma = rppo_agent.gamma
+        # Assign *undiscounted* rewards so PPO/GAE can correctly compute returns.
+        # Only the terminal step receives the final reward; intermediate steps get 0.
         n_p0 = len(transitions_p0)
         for i, (obs, action) in enumerate(transitions_p0):
-            steps_to_end = n_p0 - i - 1
-            discounted_reward = final_reward_p0 * (gamma ** steps_to_end)
-
             if i + 1 < n_p0:
+                # Intermediate steps: reward 0, next_obs is the next P0 observation
+                reward = 0.0
                 next_obs = transitions_p0[i + 1][0]
                 done = False
             else:
+                # Final step: receive terminal outcome reward
+                reward = final_reward_p0
                 next_obs = torch.zeros_like(obs)
                 done = True
 
-            rppo_agent.store_transition(obs, action, discounted_reward, next_obs, done)
+            rppo_agent.store_transition(obs, action, reward, next_obs, done)
 
         # Perform PPO update after every episode
         metrics = rppo_agent.train(batch_size=batch_size)
@@ -222,7 +223,9 @@ def train_rppo(
         # Periodic evaluation vs random opponent
         if eval_every > 0 and episode % eval_every == 0:
             print(f"\n=== Evaluation after episode {episode} ===")
-            eval_stats = evaluate_agent(rppo_agent, game, num_episodes=eval_episodes, device=device)
+            eval_stats = evaluate_agent(
+                rppo_agent, game, num_episodes=eval_episodes, device=device
+            )
             win_rate = eval_stats["win_rate"]
             print(
                 f"Eval vs random: win_rate={win_rate:.3f}, "

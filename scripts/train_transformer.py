@@ -15,6 +15,8 @@ from junqi_drl.agents.junqi_transformer import JunqiMoveTransformer
 from junqi_drl.agents.transformer_agent import TransformerAgent
 from junqi_drl.agents.random_agent import RandomAgent
 from junqi_drl.core.metrics import MetricsLogger
+from junqi_drl.game import junqi_8x3  # noqa: F401
+from junqi_drl.game import junqi_standard  # noqa: F401
 
 def apply_transformer_action(state, action_int, num_cells, pass_action_env_id):
     """
@@ -46,6 +48,7 @@ def train_transformer(
     num_steps=512,
     minibatch_size=32,
     update_epochs=4,
+    opponent_update_freq=50, 
     d_model=64,
     nhead=4,
     num_layers=2,
@@ -77,6 +80,7 @@ def train_transformer(
         minibatch_size: Minibatch size for PPO updates
         update_epochs: PPO update epochs per iteration
         d_model: Transformer model dimension
+        opponent_update_freq: Iterations between syncing opponent weights
         nhead: Number of attention heads
         num_layers: Number of transformer layers
         dropout: Dropout rate
@@ -154,6 +158,20 @@ def train_transformer(
         ent_coef_end=ent_coef_end,
         training_mode=True
     )
+    opponent_agent = TransformerAgent(
+        player_id=1,
+        board_variant=board_variant,
+        device=device,
+        d_model=d_model,
+        nhead=nhead,
+        num_layers=num_layers,
+        dropout=0.0, # No dropout for inference opponent
+        game=game,
+        training_mode=False
+    )
+    opponent_agent.model.load_state_dict(agent.model.state_dict())
+    print("Initialized Opponent with Main Agent weights.")
+
     eval_opponent = RandomAgent(player_id=1)
     best_win_rate = 0.0
     pass_action_env_id = game.num_distinct_actions() - 1
@@ -172,44 +190,56 @@ def train_transformer(
         while steps_collected < num_steps:
             if state.is_terminal():
                 state = game.new_initial_state()
+                opponent_agent.pending_to_idx = None
                 continue
-
-            if not getattr(state, "selecting_piece", True):
-                raise RuntimeError("Transformer step requested while env awaits destination.")
 
             player_id = state.current_player()
+            if player_id == 0:
+                if not getattr(state, "selecting_piece", True):
+                    raise RuntimeError("Transformer step requested while env awaits destination.")
 
-            with torch.no_grad():
-                obs = agent.process_obs(state, player_id)
-                mask = agent.process_mask(state, player_id)
-                logits, value = agent.model(obs, mask=mask)
-                dist = Categorical(logits=logits)
-                action = dist.sample()
-                logprob = dist.log_prob(action)
+                with torch.no_grad():
+                    obs = agent.process_obs(state, player_id)
+                    mask = agent.process_mask(state, player_id)
+                    logits, value = agent.model(obs, mask=mask)
+                    dist = Categorical(logits=logits)
+                    action = dist.sample()
+                    logprob = dist.log_prob(action)
 
-            transformer_action = action.item()
-            success = apply_transformer_action(
-                state,
-                transformer_action,
-                agent.num_cells,
-                pass_action_env_id,
-            )
-            if not success:
-                # Skip logging this step so the buffer stays consistent.
-                continue
+                transformer_action = action.item()
+                success = apply_transformer_action(
+                    state,
+                    transformer_action,
+                    agent.num_cells,
+                    pass_action_env_id,
+                )
+                if not success:
+                    # Skip logging this step so the buffer stays consistent.
+                    continue
 
-            rewards = state.rewards()
-            step_reward = rewards[player_id]
+                rewards = state.rewards()
+                step_reward = rewards[player_id]
 
-            obs_buffer.append(obs)
-            mask_buffer.append(mask)
-            action_buffer.append(action)
-            logprob_buffer.append(logprob)
-            value_buffer.append(value)
-            reward_buffer.append(torch.tensor(step_reward, device=device))
-            done_buffer.append(torch.tensor(state.is_terminal(), dtype=torch.float32, device=device))
+                obs_buffer.append(obs)
+                mask_buffer.append(mask)
+                action_buffer.append(action)
+                logprob_buffer.append(logprob)
+                value_buffer.append(value)
+                reward_buffer.append(torch.tensor(step_reward, device=device))
+                done_buffer.append(torch.tensor(state.is_terminal(), dtype=torch.float32, device=device))
 
-            steps_collected += 1
+                steps_collected += 1
+            else:
+                action = opponent_agent.choose_action(state)
+                state.apply_action(action)
+
+                if state.is_terminal():
+                    if reward_buffer:
+                        final_reward = state.returns()[0]
+                        reward_buffer[-1] = torch.tensor(final_reward, device=device)
+                        done_buffer[-1] = torch.tensor(1.0, dtype=torch.float32, device=device)
+                    state = game.new_initial_state()
+                    opponent_agent.pending_to_idx = None
 
         with torch.no_grad():
             if state.is_terminal():
@@ -340,6 +370,10 @@ def train_transformer(
                     "best_eval_winrate": best_win_rate
                 }, step=iteration)
 
+        if iteration % opponent_update_freq == 0:
+            opponent_agent.model.load_state_dict(agent.model.state_dict())
+            opponent_agent.reset()
+
     torch.save(agent.model.state_dict(), os.path.join(save_dir, "transformer_final.pth"))
     print("Training Complete.")
     print(f"Best win rate vs random: {best_win_rate:.2%}")
@@ -400,6 +434,8 @@ if __name__ == "__main__":
                         help="WandB project name")
     parser.add_argument("--wandb_run_name", type=str, default=None,
                         help="WandB run name")
+    parser.add_argument("--opponent_update_freq", type=int, default=50,
+                        help="Iterations between syncing opponent weights")
     
     args = parser.parse_args()
     
@@ -449,5 +485,6 @@ if __name__ == "__main__":
         eval_episodes=args.eval_episodes,
         use_wandb=args.wandb,
         wandb_project=args.wandb_project,
-        wandb_run_name=args.wandb_run_name
+        wandb_run_name=args.wandb_run_name,
+        opponent_update_freq=args.opponent_update_freq
     )

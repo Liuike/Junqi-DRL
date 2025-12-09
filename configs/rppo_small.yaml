@@ -1,0 +1,43 @@
+# RPPO Small Training Configuration (medium-speed dev runs)
+game:
+  mode: junqi_8x3
+  board_variant: small
+
+training:
+  num_episodes: 500 # enough for early-stage behavior learning
+  num_iterations: 500
+  eval_every: 100
+  eval_episodes: 50
+  save_dir: models/rppo_small
+  device: auto
+  seed: 123
+
+agent:
+  type: rppo
+
+  # RPPO hyperparameters
+  lr: 0.0003
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_eps: 0.2
+  k_epochs: 4
+  value_coef: 0.5
+  entropy_coef: 0.01
+  max_grad_norm: 0.5
+
+  # Network
+  hidden_size: 192 # mid-size model for faster training
+
+  # Training
+  batch_size: 32
+
+wandb:
+  enabled: true
+  project: junqi-rppo
+  entity: null
+  run_name: rppo_small_run
+  tags:
+    - dev
+    - small
+    - rppo
+    - junqi_8x3

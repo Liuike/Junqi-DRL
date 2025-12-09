@@ -5,6 +5,7 @@ description = "Final project for CSCI1470 at Brown University"
 requires-python = "==3.11.6"
 dependencies = [
     "open-spiel-junqi==1.4.3",
+    "pyyaml>=6.0.3",
     "torch>=2.9.1",
     "wandb>=0.23.1",
 ]

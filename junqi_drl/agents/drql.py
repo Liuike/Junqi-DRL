@@ -262,7 +262,7 @@ class DRQLAgent(BaseAgent):
             q_vals = q_vals.squeeze(0).squeeze(0)
 
         masked_q = torch.full_like(q_vals, -1e9)
-        legal_tensor = torch.tensor(legal_actions, device=self.device)
+        legal_tensor = torch.tensor(legal_actions, dtype=torch.long, device=self.device)
         masked_q[legal_tensor] = q_vals[legal_tensor]
         return masked_q.argmax().item()
 

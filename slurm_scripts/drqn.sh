@@ -15,4 +15,4 @@ module load python
 # export PYTHONPATH=$(pwd):$PYTHONPATH
 # source .venv/bin/activate
 
-uv run python -u scripts/train_from_config.py configs/drqn_train.yaml
+uv run python -u scripts/train_from_config.py configs/drqn_spatial.yaml

@@ -195,6 +195,10 @@ def train_drql(
 
         while not state.is_terminal():
             cur_player = state.current_player()
+            # current_player() may set terminal if no legal moves
+            if state.is_terminal():
+                break
+                
             if cur_player == 0:
                 legal_actions = state.legal_actions(0)
                 obs = drql_agent.get_obs(state)
@@ -344,10 +348,14 @@ def train_drql(
                 drql_agent.reset_hidden()
                 while not s.is_terminal():
                     p = s.current_player()
+                    # current_player() may set terminal if no legal moves
+                    if s.is_terminal():
+                        break
+                    
                     if p == 0:
                         a = drql_agent.choose_action(s, s.legal_actions(0), eval_mode=True)
                     else:
-                        a = eval_opponent.step(s)
+                        a = eval_opponent.choose_action(s, s.legal_actions(1), eval_mode=True)
                     s.apply_action(a)
                 r0 = s.returns()[0]
                 if r0 > 0:

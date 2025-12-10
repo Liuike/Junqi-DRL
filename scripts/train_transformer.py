@@ -18,15 +18,11 @@ from junqi_drl.core.metrics import MetricsLogger
 from junqi_drl.game import junqi_8x3  # noqa: F401
 from junqi_drl.game import junqi_standard  # noqa: F401
 
-def apply_transformer_action(state, action_int, num_cells, pass_action_env_id):
+def apply_transformer_action(state, action_int, num_cells):
     """
     Map flattened transformer action to two sequential env actions.
     Returns True if the move was successfully applied, False if the selection was rejected.
     """
-    if action_int == num_cells * num_cells:
-        state.apply_action(pass_action_env_id)
-        return True
-
     from_idx = action_int // num_cells
     to_idx = action_int % num_cells
 
@@ -174,7 +170,6 @@ def train_transformer(
 
     eval_opponent = RandomAgent(player_id=1)
     best_win_rate = 0.0
-    pass_action_env_id = game.num_distinct_actions() - 1
 
     for iteration in range(1, num_iterations + 1):
         frac = (iteration - 1.0) / num_iterations
@@ -194,6 +189,16 @@ def train_transformer(
                 continue
 
             player_id = state.current_player()
+            # current_player() may set terminal if no legal moves
+            if state.is_terminal():
+                if reward_buffer:
+                    final_reward = state.returns()[0]
+                    reward_buffer[-1] = torch.tensor(final_reward, device=device)
+                    done_buffer[-1] = torch.tensor(1.0, dtype=torch.float32, device=device)
+                state = game.new_initial_state()
+                opponent_agent.pending_to_idx = None
+                continue
+            
             if player_id == 0:
                 if not getattr(state, "selecting_piece", True):
                     raise RuntimeError("Transformer step requested while env awaits destination.")
@@ -211,7 +216,6 @@ def train_transformer(
                     state,
                     transformer_action,
                     agent.num_cells,
-                    pass_action_env_id,
                 )
                 if not success:
                     # Skip logging this step so the buffer stays consistent.
@@ -334,6 +338,10 @@ def train_transformer(
                 s = game.new_initial_state()
                 while not s.is_terminal():
                     p = s.current_player()
+                    # current_player() may set terminal if no legal moves
+                    if s.is_terminal():
+                        break
+                    
                     if p == 0:
                         if not getattr(s, "selecting_piece", True):
                             raise RuntimeError("Evaluation desync: env expects destination.")
@@ -342,13 +350,14 @@ def train_transformer(
                             m = agent.process_mask(s, p)
                             logits, _ = agent.model(o, mask=m)
                             move = logits.argmax(dim=1).item()
-                        success = apply_transformer_action(s, move, agent.num_cells, pass_action_env_id)
+                        success = apply_transformer_action(s, move, agent.num_cells)
                         if not success:
-                            # If greedy move became stale, treat as pass to keep eval moving.
-                            s.apply_action(pass_action_env_id)
+                            # If greedy move became stale, skip this game
+                            break
                     else:
-                        s.apply_action(eval_opponent.step(s))
-                if s.returns()[0] > 0:
+                        legal_actions = s.legal_actions(1)
+                        s.apply_action(eval_opponent.choose_action(s, legal_actions, eval_mode=True))
+                if s.is_terminal() and s.returns()[0] > 0:
                     eval_wins += 1
 
             agent.model.train()

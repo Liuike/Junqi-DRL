@@ -103,6 +103,10 @@ def play_game(agent0, agent1, game, verbose: bool = False) -> int:
     
     while not state.is_terminal():
         current_player = state.current_player()
+        # current_player() may set terminal if no legal moves
+        if state.is_terminal():
+            break
+        
         agent = agents[current_player]
         legal_actions = state.legal_actions(current_player)
         
@@ -110,7 +114,8 @@ def play_game(agent0, agent1, game, verbose: bool = False) -> int:
         if hasattr(agent, 'choose_action'):
             action = agent.choose_action(state, legal_actions, eval_mode=True)
         else:
-            action = agent.step(state) if hasattr(agent, 'step') else agent.choose_action(state)
+            # Fallback for agents without choose_action
+            action = agent.choose_action(state)
         
         state.apply_action(action)
         move_count += 1

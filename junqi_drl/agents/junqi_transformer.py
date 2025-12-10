@@ -31,7 +31,7 @@ class JunqiMoveTransformer(nn.Module):
         self.width = board["width"]
         self.channels = board["channels"]
         self.seq_len = self.height * self.width
-        self.total_actions = self.seq_len * self.seq_len + 1  # include pass action
+        self.total_actions = self.seq_len * self.seq_len  # From-To pairs only
         
         # 1. Input Projection & Positional Embeddings 
         self.input_proj = nn.Linear(self.channels, d_model)
@@ -53,7 +53,6 @@ class JunqiMoveTransformer(nn.Module):
         self.key_head = nn.Linear(d_model, d_model)    # W_k: ending square features
 
         self.value_head = nn.Linear(d_model, 1) # V: state value
-        self.pass_head = nn.Linear(d_model, 1)  # Separate head for pass
 
         self._reset_parameters()
 
@@ -65,7 +64,6 @@ class JunqiMoveTransformer(nn.Module):
         # Init new heads
         nn.init.xavier_uniform_(self.query_head.weight)
         nn.init.xavier_uniform_(self.key_head.weight)
-        nn.init.xavier_uniform_(self.pass_head.weight)
 
     def forward(
         self, x: torch.Tensor, mask: Optional[torch.Tensor] = None
@@ -73,7 +71,7 @@ class JunqiMoveTransformer(nn.Module):
         """
         Args:
             x: (B, H, W, C)
-            mask: (B, Seq_Len * Seq_Len + 1) - flattened mask for From-To pairs + pass
+            mask: (B, Seq_Len * Seq_Len) - flattened mask for From-To pairs
         Returns:
             move_logits: (B, Seq_Len * Seq_Len) representing Flat (From -> To)
             values: (B, 1)
@@ -111,12 +109,7 @@ class JunqiMoveTransformer(nn.Module):
         # Index k corresponds to: From (k // S) -> To (k % S)
         action_logits = move_matrix.flatten(start_dim=1) 
 
-        # --- 3. Append Pass Logit ---
-        pooled = encoded.mean(dim=1)
-        pass_logit = self.pass_head(pooled)  # (B, 1)
-        action_logits = torch.cat([action_logits, pass_logit], dim=1)
-
-        # --- 4. Masking ---
+        # --- 3. Masking ---
         if mask is not None:
             if mask.shape[-1] != self.total_actions:
                 raise ValueError(
@@ -125,7 +118,8 @@ class JunqiMoveTransformer(nn.Module):
             illegal = mask <= 0
             action_logits = action_logits.masked_fill(illegal, -1e9)
 
-        # --- 5. Value ---
+        # --- 4. Value ---
+        pooled = encoded.mean(dim=1)
         values = self.value_head(pooled)
 
         return action_logits, values

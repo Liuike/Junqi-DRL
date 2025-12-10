@@ -50,9 +50,8 @@ def evaluate_agent(agent: RPPoAgent, game, num_episodes: int = 50, device="cpu")
                 action = agent.choose_action(state, legal_actions, eval_mode=True)
                 state.apply_action(action)
             else:
-                action = random_agent.step(state)
-                if action is None:
-                    break
+                legal_actions = state.legal_actions(1)
+                action = random_agent.choose_action(state, legal_actions, eval_mode=True)
                 state.apply_action(action)
             move_count += 1
 
@@ -165,6 +164,10 @@ def train_rppo(
 
         while not state.is_terminal():
             cur_player = state.current_player()
+            # current_player() may set terminal if no legal moves
+            if state.is_terminal():
+                break
+            
             if cur_player == 0:
                 legal_actions = state.legal_actions(0)
                 if not legal_actions:
@@ -174,9 +177,8 @@ def train_rppo(
                 transitions_p0.append((obs, action))
                 state.apply_action(action)
             else:
-                action = opponent_agent.step(state)
-                if action is None:
-                    break
+                legal_actions = state.legal_actions(1)
+                action = opponent_agent.choose_action(state, legal_actions, eval_mode=True)
                 state.apply_action(action)
 
         # Terminal reward from the game

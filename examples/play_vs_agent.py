@@ -32,23 +32,37 @@ def load_agent(agent_type: str, board_variant: str, player_id: int, device: str)
     if board_variant == "small":
         game_mode = "junqi_8x3"
         if agent_type == "drql":
-            model_path = "final_models/drql_spatial_final.pth"
+            model_path = "final_models/drql_spatial_final_8x3.pth"
+            if not Path(model_path).exists():
+                raise FileNotFoundError(f"DRQL model for small board not found: {model_path}")
         elif agent_type == "rppo":
-            model_path = "final_models/rppo_best.pt"
+            model_path = "final_models/rppo_best_8x3.pt"
+            if not Path(model_path).exists():
+                raise FileNotFoundError(f"RPPO model for small board not found: {model_path}")
         elif agent_type == "transformer":
-            model_path = "final_models/transformer_final.pth"
+            model_path = "final_models/transformer_final_8x3.pth"
+            if not Path(model_path).exists():
+                raise FileNotFoundError(f"Transformer model for small board not found: {model_path}")
+        else:
+            raise ValueError(f"Unknown agent type: {agent_type}")
+    elif board_variant == "standard":
+        game_mode = "junqi_standard"
+        if agent_type == "drql":
+            model_path = "final_models/drql_spatial_final_standard.pth"
+            if not Path(model_path).exists():
+                raise FileNotFoundError(f"DRQL model for standard board not found: {model_path}")
+        elif agent_type == "rppo":
+            model_path = "final_models/rppo_best_standard.pt"
+            if not Path(model_path).exists():
+                raise FileNotFoundError(f"RPPO model for standard board not found: {model_path}")
+        elif agent_type == "transformer":
+            model_path = "final_models/transformer_final_standard.pth"
+            if not Path(model_path).exists():
+                raise FileNotFoundError(f"Transformer model for standard board not found: {model_path}")
         else:
             raise ValueError(f"Unknown agent type: {agent_type}")
     else:
-        game_mode = "junqi_standard"
-        if agent_type == "drql":
-            model_path = "final_models/drql_spatial_final.pth"
-        elif agent_type == "rppo":
-            model_path = "final_models/rppo_best.pt"
-        elif agent_type == "transformer":
-            model_path = "final_models/transformer_final.pth"
-        else:
-            raise ValueError(f"Unknown agent type: {agent_type}")
+        raise ValueError(f"Unknown board variant: {board_variant}")
     
     game = pyspiel.load_game(game_mode)
     

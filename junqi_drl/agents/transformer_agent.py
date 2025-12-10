@@ -78,9 +78,6 @@ class TransformerAgent(BaseAgent):
         self.num_cells = self.seq_len
         self.total_actions = self.model.total_actions
         
-        # Compute pass action ID (last action in the game)
-        self.pass_action_id = self.seq_len
-        
         # Internal memory for the 2-step move process
         self.pending_to_idx = None
         
@@ -118,19 +115,11 @@ class TransformerAgent(BaseAgent):
         full_mask = np.zeros(self.total_actions, dtype=np.float32)
         
         env_legal_actions = state.legal_actions(player_id)
-        
-        pass_env_id = len(state.decode_action) - 1
-        # Pass check
-        if pass_env_id in env_legal_actions:
-            full_mask[-1] = 1.0
-            if len(env_legal_actions) == 1:
-                return torch.tensor(full_mask, dtype=torch.float32, device=self.device).unsqueeze(0)
-
         decode_action = state.decode_action
         
-        # Move check
+        # Move check - mark all legal from-to pairs
         for from_idx in env_legal_actions:
-            if from_idx == pass_env_id or from_idx >= num_cells:
+            if from_idx >= num_cells:
                 continue
             row, col = decode_action[from_idx]
             try:
@@ -187,13 +176,14 @@ class TransformerAgent(BaseAgent):
                 self.pending_to_idx = None
                 return action
 
-        # Case 2: Pass action handling (Env might only allow Pass)
-        pass_id = len(state.decode_action)
+        # Case 2: Start new move (Step 1)
         legal_actions = state.legal_actions(self.player_id)
-        if legal_actions == [pass_id]:
-           return pass_id
-
-        # Case 3: Start new move (Step 1)
+        
+        # If no legal actions, game should be terminal - shouldn't reach here
+        if not legal_actions:
+            raise RuntimeError(f"Player {self.player_id} has no legal actions but game is not terminal")
+        
+        # Get model prediction
         obs_tensor = self.process_obs(state)
         mask_tensor = self.process_mask(state)
 
@@ -207,24 +197,19 @@ class TransformerAgent(BaseAgent):
             probs = torch.softmax(action_logits, dim=0)
             action_int = torch.multinomial(probs, 1).item()
 
-        # Decode
-        pass_idx_transformer = self.model.total_actions - 1
-        
-        if action_int == pass_idx_transformer:
-            return self.pass_action_id
-        else:
-            num_cells = self.seq_len
-            from_idx = action_int // num_cells
-            to_idx = action_int % num_cells
+        # Decode from flattened action to from_idx and to_idx
+        num_cells = self.seq_len
+        from_idx = action_int // num_cells
+        to_idx = action_int % num_cells
 
-            # Check if the model's chosen 'from_idx' is actually legal.
-            if from_idx not in legal_actions:
-                fallback_action = np.random.choice(legal_actions)
-                return fallback_action.item()
+        # Check if the model's chosen 'from_idx' is actually legal.
+        if from_idx not in legal_actions:
+            fallback_action = np.random.choice(legal_actions)
+            return fallback_action.item()
 
-            # Only set pending if the first step is valid
-            self.pending_to_idx = to_idx
-            return from_idx
+        # Only set pending if the first step is valid
+        self.pending_to_idx = to_idx
+        return from_idx
 
     def save(self, path: str):
         """

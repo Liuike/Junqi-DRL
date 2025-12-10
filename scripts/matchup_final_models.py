@@ -185,17 +185,20 @@ def play_game(agent0, agent1, game, agent0_name: str, agent1_name: str, verbose:
     
     while not state.is_terminal():
         current_player = state.current_player()
-        agent = agents[current_player]
+        # current_player() may set terminal if no legal moves
+        if state.is_terminal():
+            break
         
+        agent = agents[current_player]
         legal_actions = state.legal_actions(current_player)
         
         # Get action from agent
         if hasattr(agent, 'choose_action'):
-            # DRQL or RPPO agent
+            # DRQL, RPPO, or Transformer agent
             action = agent.choose_action(state, legal_actions, eval_mode=True)
         else:
-            # Transformer or Random agent
-            action = agent.step(state) if hasattr(agent, 'step') else agent.choose_action(state)
+            # Fallback
+            action = agent.choose_action(state)
         
         if verbose and move_count % 50 == 0:
             print(f"  Move {move_count}: Player {current_player} ({['agent0', 'agent1'][current_player]})")

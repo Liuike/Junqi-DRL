@@ -1,10 +1,12 @@
 __pycache__/
 *.py[cod]
 *$py.class
-*.pth
 .DS_Store
 **/.DS_Store
 logs
 
 slurm_logs/
 wandb/
+
+models/
+models_transformer

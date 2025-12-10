@@ -43,6 +43,11 @@ def evaluate_agent(agent: RPPoAgent, game, num_episodes: int = 50, device="cpu")
 
         while not state.is_terminal():
             cur_player = state.current_player()
+
+            # current_player() can mark the state terminal if no moves exist
+            if cur_player == pyspiel.PlayerId.TERMINAL or state.is_terminal():
+                break
+
             if cur_player == 0:
                 legal_actions = state.legal_actions(0)
                 if not legal_actions:
@@ -51,8 +56,11 @@ def evaluate_agent(agent: RPPoAgent, game, num_episodes: int = 50, device="cpu")
                 state.apply_action(action)
             else:
                 legal_actions = state.legal_actions(1)
+                if not legal_actions:
+                    break
                 action = random_agent.choose_action(state, legal_actions, eval_mode=True)
                 state.apply_action(action)
+
             move_count += 1
 
         returns = state.returns()

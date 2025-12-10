@@ -1,13 +1,18 @@
+#!/usr/bin/env python3
 import os
 import sys
+from typing import Dict, List, Tuple
+
 import numpy as np
 import torch
 import pyspiel
 
+# Make project root importable
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 try:
     import wandb
+
     WANDB_AVAILABLE = True
 except ImportError:
     WANDB_AVAILABLE = False
@@ -15,14 +20,19 @@ except ImportError:
 
 from junqi_drl.agents.rppo import RPPoAgent
 from junqi_drl.agents.random_agent import RandomAgent
-from junqi_drl.game import junqi_8x3
-from junqi_drl.game import junqi_standard  # imported for completeness, default is 8x3
+from junqi_drl.game import junqi_8x3  # noqa: F401
+from junqi_drl.game import junqi_standard  # noqa: F401
 
 # Default to the small 8x3 board for training
 gamemode = "junqi_8x3"
 
 
-def evaluate_agent(agent: RPPoAgent, game, num_episodes: int = 50, device="cpu"):
+def evaluate_agent(
+    agent: RPPoAgent,
+    game,
+    num_episodes: int = 50,
+    device: str | torch.device = "cpu",
+) -> Dict[str, float]:
     """
     Evaluate the given agent against a random opponent.
 
@@ -30,6 +40,7 @@ def evaluate_agent(agent: RPPoAgent, game, num_episodes: int = 50, device="cpu")
     """
     agent_device = torch.device(device)
     agent.net.to(agent_device)
+
     random_agent = RandomAgent(player_id=1)
 
     wins = draws = losses = 0
@@ -44,33 +55,33 @@ def evaluate_agent(agent: RPPoAgent, game, num_episodes: int = 50, device="cpu")
         while not state.is_terminal():
             cur_player = state.current_player()
 
-            # current_player() can mark the state terminal if no moves exist
-            if cur_player == pyspiel.PlayerId.TERMINAL or state.is_terminal():
-                break
-
             if cur_player == 0:
                 legal_actions = state.legal_actions(0)
                 if not legal_actions:
                     break
-                action = agent.choose_action(state, legal_actions, eval_mode=True)
+
+                action = agent.choose_action(
+                    state, legal_actions, eval_mode=True
+                )
                 state.apply_action(action)
             else:
-                legal_actions = state.legal_actions(1)
-                if not legal_actions:
+                action = random_agent.step(state)
+                if action is None:
                     break
-                action = random_agent.choose_action(state, legal_actions, eval_mode=True)
                 state.apply_action(action)
 
             move_count += 1
 
         returns = state.returns()
         reward_p0 = returns[0]
+
         if reward_p0 > 0:
             wins += 1
         elif reward_p0 < 0:
             losses += 1
         else:
             draws += 1
+
         total_moves += move_count
 
     win_rate = wins / num_episodes
@@ -98,7 +109,7 @@ def train_rppo(
     use_wandb: bool = True,
     wandb_project: str = "junqi-rppo",
     wandb_run_name: str | None = None,
-    # RPPO hyperparameters
+    # RPPO hyperparameters (MUST match train_from_config.py!)
     lr: float = 3e-4,
     gamma: float = 0.99,
     gae_lambda: float = 0.95,
@@ -112,7 +123,7 @@ def train_rppo(
 ):
     os.makedirs(save_dir, exist_ok=True)
 
-    # Initialize wandb
+    # Initialize wandb (similar spirit to transformer/drql)
     if use_wandb and WANDB_AVAILABLE:
         wandb.init(
             project=wandb_project,
@@ -123,6 +134,17 @@ def train_rppo(
                 "num_episodes": num_episodes,
                 "eval_every": eval_every,
                 "eval_episodes": eval_episodes,
+                "lr": lr,
+                "gamma": gamma,
+                "gae_lambda": gae_lambda,
+                "clip_eps": clip_eps,
+                "k_epochs": k_epochs,
+                "value_coef": value_coef,
+                "entropy_coef": entropy_coef,
+                "max_grad_norm": max_grad_norm,
+                "hidden_size": hidden_size,
+                "batch_size": batch_size,
+                "device": str(device),
             },
         )
         use_wandb = True
@@ -158,8 +180,9 @@ def train_rppo(
     # Opponent: simple random agent on player 1
     opponent_agent = RandomAgent(player_id=1)
 
-    episode_raw_rewards: list[float] = []
-    episode_lengths: list[int] = []
+    episode_raw_rewards: List[float] = []
+    episode_lengths: List[int] = []
+
     best_eval_win_rate = 0.0
 
     for episode in range(1, num_episodes + 1):
@@ -167,47 +190,51 @@ def train_rppo(
         rppo_agent.reset_hidden()
         opponent_agent.reset()
 
-        # Store (obs, action) for player 0
-        transitions_p0: list[tuple[torch.Tensor, int]] = []
+        # Store (obs, action) for player 0 transitions
+        transitions_p0: List[Tuple[torch.Tensor, int]] = []
 
         while not state.is_terminal():
             cur_player = state.current_player()
-            # current_player() may set terminal if no legal moves
-            if state.is_terminal():
-                break
-            
+
             if cur_player == 0:
                 legal_actions = state.legal_actions(0)
                 if not legal_actions:
                     break
+
                 obs = rppo_agent.get_obs(state)
-                action = rppo_agent.choose_action(state, legal_actions, eval_mode=False)
+                action = rppo_agent.choose_action(
+                    state, legal_actions, eval_mode=False
+                )
+
                 transitions_p0.append((obs, action))
                 state.apply_action(action)
             else:
-                legal_actions = state.legal_actions(1)
-                action = opponent_agent.choose_action(state, legal_actions, eval_mode=True)
+                action = opponent_agent.step(state)
+                if action is None:
+                    break
                 state.apply_action(action)
 
         # Terminal reward from the game
         raw_reward = state.returns()[0]
         game_length = len(transitions_p0)
+
         episode_raw_rewards.append(raw_reward)
         episode_lengths.append(game_length)
 
         # Map terminal return to final rewards for P0
+        # Strong penalty for draw (same convention as DRQL training)
         if raw_reward == 0:
-            # Strong penalty for draw (same convention as DRQL training)
             final_reward_p0 = -1.0
         else:
             final_reward_p0 = raw_reward  # +1 or -1
 
         # Assign discounted reward to each P0 step
-        gamma = rppo_agent.gamma
+        gamma_discount = rppo_agent.gamma
         n_p0 = len(transitions_p0)
+
         for i, (obs, action) in enumerate(transitions_p0):
             steps_to_end = n_p0 - i - 1
-            discounted_reward = final_reward_p0 * (gamma ** steps_to_end)
+            discounted_reward = final_reward_p0 * (gamma_discount ** steps_to_end)
 
             if i + 1 < n_p0:
                 next_obs = transitions_p0[i + 1][0]
@@ -216,24 +243,35 @@ def train_rppo(
                 next_obs = torch.zeros_like(obs)
                 done = True
 
-            rppo_agent.store_transition(obs, action, discounted_reward, next_obs, done)
+            rppo_agent.store_transition(
+                obs, action, discounted_reward, next_obs, done
+            )
 
         # Perform PPO update after every episode
         metrics = rppo_agent.train(batch_size=batch_size)
+
         if metrics is None:
             print(f"Episode {episode}: no update (not enough data)")
         else:
             avg_reward = metrics.get("avg_reward", 0.0)
             print(
                 f"Episode {episode}: raw_reward={raw_reward:.2f}, "
-                f"avg_reward_batch={avg_reward:.3f}, steps={metrics.get('num_steps', 0)}"
+                f"avg_reward_batch={avg_reward:.3f}, "
+                f"steps={metrics.get('num_steps', 0)}"
             )
 
         # Periodic evaluation vs random opponent
         if eval_every > 0 and episode % eval_every == 0:
             print(f"\n=== Evaluation after episode {episode} ===")
-            eval_stats = evaluate_agent(rppo_agent, game, num_episodes=eval_episodes, device=device)
+            eval_stats = evaluate_agent(
+                rppo_agent,
+                game,
+                num_episodes=eval_episodes,
+                device=device,
+            )
+
             win_rate = eval_stats["win_rate"]
+
             print(
                 f"Eval vs random: win_rate={win_rate:.3f}, "
                 f"draw_rate={eval_stats['draw_rate']:.3f}, "
@@ -246,9 +284,12 @@ def train_rppo(
                 best_eval_win_rate = win_rate
                 best_path = os.path.join(save_dir, "rppo_best.pt")
                 rppo_agent.save(best_path)
-                print(f"  → New best model saved to {best_path} (win_rate={win_rate:.3f})")
+                print(
+                    f" → New best model saved to {best_path} "
+                    f"(win_rate={win_rate:.3f})"
+                )
 
-            # Log eval metrics to wandb
+            # Log eval metrics to wandb (step = episode like transformer/drql)
             if use_wandb:
                 wandb.log(
                     {
@@ -260,21 +301,25 @@ def train_rppo(
                         "eval_vs_random/draws": eval_stats["draws"],
                         "eval_vs_random/losses": eval_stats["losses"],
                         "eval_vs_random/avg_moves": eval_stats["avg_moves"],
-                    }
+                    },
+                    step=episode,
                 )
 
-        # Log training metrics to wandb
+        # Log training metrics to wandb every episode
         if use_wandb and metrics is not None:
-            log_dict = {
+            log_dict: Dict[str, float] = {
                 "episode": episode,
                 "raw_reward": raw_reward,
                 "episode_length": game_length,
                 "best_eval_win_rate": best_eval_win_rate,
             }
-            # Merge PPO-specific metrics
+
+            # Merge PPO-specific metrics (losses, entropy, etc.)
             for k, v in metrics.items():
                 log_dict[f"train/{k}"] = v
-            wandb.log(log_dict)
+
+            # This is what creates the training curves in wandb
+            wandb.log(log_dict, step=episode)
 
         # Periodically save checkpoint
         if episode % 500 == 0:
@@ -289,6 +334,7 @@ def train_rppo(
 
 if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
     train_rppo(
         num_episodes=5000,
         eval_every=1000,

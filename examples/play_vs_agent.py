@@ -192,6 +192,8 @@ def play_game(agent, game, human_player: int, agent_name: str, board_variant: st
     
     while not state.is_terminal():
         current_player = state.current_player()
+        if state.is_terminal():
+            break
         legal_actions = state.legal_actions(current_player)
         
         if not legal_actions:

@@ -6,11 +6,17 @@ import pyspiel
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
+try:
+    import wandb
+    WANDB_AVAILABLE = True
+except ImportError:
+    WANDB_AVAILABLE = False
+    print("Warning: wandb not available, metrics will not be logged to W&B")
+
 from junqi_drl.agents.rppo import RPPoAgent
 from junqi_drl.agents.random_agent import RandomAgent
 from junqi_drl.game import junqi_8x3
 from junqi_drl.game import junqi_standard  # imported for completeness, default is 8x3
-from junqi_drl.core.metrics import MetricsLogger
 
 # Default to the small 8x3 board for training
 gamemode = "junqi_8x3"
@@ -98,35 +104,22 @@ def train_rppo(
 ):
     os.makedirs(save_dir, exist_ok=True)
 
-    # Build run config and metrics logger (handles W&B internally if enabled)
-    config = {
-        "algo": "R-PPO",
-        "game_mode": gamemode,
-        "num_episodes": num_episodes,
-        "eval_every": eval_every,
-        "eval_episodes": eval_episodes,
-        "lr": lr,
-        "gamma": gamma,
-        "gae_lambda": gae_lambda,
-        "clip_eps": clip_eps,
-        "k_epochs": k_epochs,
-        "value_coef": value_coef,
-        "entropy_coef": entropy_coef,
-        "max_grad_norm": max_grad_norm,
-        "hidden_size": hidden_size,
-        "batch_size": batch_size,
-        "device": str(device),
-    }
-
-    metrics_logger = MetricsLogger(
-        use_wandb=use_wandb,
-        wandb_config={
-            "project": wandb_project,
-            "name": wandb_run_name,
-            "config": config,
-            "tags": ["rppo"],
-        },
-    )
+    # Initialize wandb
+    if use_wandb and WANDB_AVAILABLE:
+        wandb.init(
+            project=wandb_project,
+            name=wandb_run_name,
+            config={
+                "algo": "R-PPO",
+                "game_mode": gamemode,
+                "num_episodes": num_episodes,
+                "eval_every": eval_every,
+                "eval_episodes": eval_episodes,
+            },
+        )
+        use_wandb = True
+    else:
+        use_wandb = False
 
     # Create game from OpenSpiel registration
     game = pyspiel.load_game(gamemode)
@@ -174,7 +167,7 @@ def train_rppo(
             # current_player() may set terminal if no legal moves
             if state.is_terminal():
                 break
-
+            
             if cur_player == 0:
                 legal_actions = state.legal_actions(0)
                 if not legal_actions:
@@ -231,9 +224,7 @@ def train_rppo(
         # Periodic evaluation vs random opponent
         if eval_every > 0 and episode % eval_every == 0:
             print(f"\n=== Evaluation after episode {episode} ===")
-            eval_stats = evaluate_agent(
-                rppo_agent, game, num_episodes=eval_episodes, device=device
-            )
+            eval_stats = evaluate_agent(rppo_agent, game, num_episodes=eval_episodes, device=device)
             win_rate = eval_stats["win_rate"]
             print(
                 f"Eval vs random: win_rate={win_rate:.3f}, "
@@ -249,41 +240,33 @@ def train_rppo(
                 rppo_agent.save(best_path)
                 print(f"  → New best model saved to {best_path} (win_rate={win_rate:.3f})")
 
-            # Log eval metrics
-            metrics_logger.log(
-                {
-                    "episode": episode,
-                    "eval_vs_random/winrate": win_rate,
-                    "eval_vs_random/drawrate": eval_stats["draw_rate"],
-                    "eval_vs_random/lossrate": eval_stats["loss_rate"],
-                    "eval_vs_random/wins": eval_stats["wins"],
-                    "eval_vs_random/draws": eval_stats["draws"],
-                    "eval_vs_random/losses": eval_stats["losses"],
-                    "eval_vs_random/avg_moves": eval_stats["avg_moves"],
-                    "best_eval_win_rate": best_eval_win_rate,
-                },
-                step=episode,
-            )
+            # Log eval metrics to wandb
+            if use_wandb:
+                wandb.log(
+                    {
+                        "episode": episode,
+                        "eval_vs_random/winrate": win_rate,
+                        "eval_vs_random/drawrate": eval_stats["draw_rate"],
+                        "eval_vs_random/lossrate": eval_stats["loss_rate"],
+                        "eval_vs_random/wins": eval_stats["wins"],
+                        "eval_vs_random/draws": eval_stats["draws"],
+                        "eval_vs_random/losses": eval_stats["losses"],
+                        "eval_vs_random/avg_moves": eval_stats["avg_moves"],
+                    }
+                )
 
-        # Log training metrics for visualization (W&B if enabled)
-        if metrics is not None:
-            avg_reward_recent = float(np.mean(episode_raw_rewards[-50:]))
-            avg_length_recent = float(np.mean(episode_lengths[-50:]))
-
+        # Log training metrics to wandb
+        if use_wandb and metrics is not None:
             log_dict = {
                 "episode": episode,
                 "raw_reward": raw_reward,
-                "raw_reward/avg_recent": avg_reward_recent,
                 "episode_length": game_length,
-                "episode_length/avg_recent": avg_length_recent,
                 "best_eval_win_rate": best_eval_win_rate,
             }
-
             # Merge PPO-specific metrics
             for k, v in metrics.items():
                 log_dict[f"train/{k}"] = v
-
-            metrics_logger.log(log_dict, step=episode)
+            wandb.log(log_dict)
 
         # Periodically save checkpoint
         if episode % 500 == 0:
@@ -291,8 +274,9 @@ def train_rppo(
             rppo_agent.save(ckpt_path)
             print(f"Checkpoint saved to {ckpt_path}")
 
-    # Finish metrics logger (and W&B run if enabled)
-    metrics_logger.finish()
+    # Finish wandb run
+    if use_wandb:
+        wandb.finish()
 
 
 if __name__ == "__main__":

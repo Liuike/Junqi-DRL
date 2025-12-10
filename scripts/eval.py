@@ -107,12 +107,17 @@ def evaluate_drqn(
 
         while not state.is_terminal():
             current_player = state.current_player()
+            # current_player() may set terminal if no legal moves
+            if state.is_terminal():
+                break
+            
             if current_player == 0:
                 legal_actions = state.legal_actions(0)
                 action = drql_agent.choose_action(state, legal_actions, eval_mode=True)
                 move_count += 1
             else:
-                action = agent.step(state)
+                legal_actions = state.legal_actions(1)
+                action = agent.choose_action(state, legal_actions, eval_mode=True)
             state.apply_action(action)
 
         returns = state.returns()
@@ -262,11 +267,16 @@ def evaluate_transformer(
         
         while not state.is_terminal():
             current_player = state.current_player()
+            # current_player() may set terminal if no legal moves
+            if state.is_terminal():
+                break
+            
             if current_player == player_agent.player_id:
                 action = player_agent.choose_action(state)
             else:
+                legal_actions = state.legal_actions(current_player)
                 if opponent_type == "random":
-                    action = opponent_agent.step(state)
+                    action = opponent_agent.choose_action(state, legal_actions, eval_mode=True)
                 else:
                     action = opponent_agent.choose_action(state)
             state.apply_action(action)

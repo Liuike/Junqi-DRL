@@ -100,7 +100,7 @@ _GAME_TYPE = pyspiel.GameType(
 )
 
 _GAME_INFO = pyspiel.GameInfo(
-    num_distinct_actions=_NUM_CELLS + 1,
+    num_distinct_actions=_NUM_CELLS,
     max_chance_outcomes=0,
     num_players=2,
     min_utility=-1.0,
@@ -196,7 +196,17 @@ class JunQi8x3State(pyspiel.State):
 
     def current_player(self) -> int:
         """Returns id of the next player to move, or TERMINAL if game is over."""
-        return pyspiel.PlayerId.TERMINAL if self._is_terminal else self._cur_player
+        if self._is_terminal:
+            return pyspiel.PlayerId.TERMINAL
+        
+        # Check if current player has no legal moves - they lose
+        if not self._legal_actions(self._cur_player):
+            self._is_terminal = True
+            # Current player loses
+            self._player0_score = -1.0 if self._cur_player == 0 else 1.0
+            return pyspiel.PlayerId.TERMINAL
+        
+        return self._cur_player
 
     def _legal_actions(self, player: int):
         """Returns a list of legal actions."""
@@ -216,9 +226,7 @@ class JunQi8x3State(pyspiel.State):
             for to_pos in self._get_legal_destinations(from_pos, player):
                 actions.append(to_pos[0] * _NUM_COLS + to_pos[1])
         
-        if not actions:
-            actions.append(_NUM_CELLS)  # Pass action
-        
+        # If no legal actions, player loses (handled in current_player)
         return actions
 
     def _has_legal_moves(self, from_pos, player: int) -> bool:
@@ -243,7 +251,16 @@ class JunQi8x3State(pyspiel.State):
         if piece.type == ChessType.ENGINEER:
             legal.extend(self._get_engineer_railway_moves(from_pos, player))
         
-        return legal
+        # Remove duplicates by converting to set of tuples and back
+        unique_legal = []
+        seen = set()
+        for pos in legal:
+            pos_tuple = tuple(pos)
+            if pos_tuple not in seen:
+                seen.add(pos_tuple)
+                unique_legal.append(pos)
+        
+        return unique_legal
 
     def _get_adjacent_moves(self, from_pos, player: int):
         """Get legal adjacent square moves."""
@@ -311,12 +328,6 @@ class JunQi8x3State(pyspiel.State):
                 or self.game_length_peace >= _NUM_MAX_PEACE_STEP):
             self._is_terminal = True
             self.draw = True
-            return
-
-        # Pass action
-        if action == _NUM_CELLS:
-            self._is_terminal = True
-            self._player0_score = -1.0 if player == 0 else 1.0
             return
 
         if self.selecting_piece:
@@ -393,8 +404,6 @@ class JunQi8x3State(pyspiel.State):
 
     def _action_to_string(self, player, action):
         """Action -> string."""
-        if action == _NUM_CELLS:
-            return "Pass"
         pos = self.decode_action[action]
         return f"P{player}:({pos[0]},{pos[1]})"
 

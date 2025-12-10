@@ -379,6 +379,11 @@ def train_transformer(
                     "best_eval_winrate": best_win_rate
                 }, step=iteration)
 
+            if iteration % 500 == 0:
+                periodic_path = os.path.join(save_dir, f"transformer_checkpoint_iter{iteration}.pth")
+                torch.save(agent.model.state_dict(), periodic_path)
+                print(f"  (Checkpoint saved: {periodic_path})")
+
         if iteration % opponent_update_freq == 0:
             opponent_agent.model.load_state_dict(agent.model.state_dict())
             opponent_agent.reset()

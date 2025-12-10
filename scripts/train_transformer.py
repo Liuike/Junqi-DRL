@@ -357,7 +357,7 @@ def train_transformer(
                     else:
                         legal_actions = s.legal_actions(1)
                         s.apply_action(eval_opponent.choose_action(s, legal_actions, eval_mode=True))
-                if s.returns()[0] > 0:
+                if s.is_terminal() and s.returns()[0] > 0:
                     eval_wins += 1
 
             agent.model.train()

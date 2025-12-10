@@ -1,45 +1,45 @@
-# RPPO Training Configuration - Production Training
+# RPPO Training Configuration - Standard Board Production Training
 
 game:
-  mode: junqi_8x3
-  board_variant: small
+  mode: junqi_standard
+  board_variant: standard
 
 training:
-  # RPPO uses episodes; num_iterations is kept for consistency but unused
-  num_episodes: 10000
-  num_iterations: 10000
-  eval_every: 500
-  eval_episodes: 200
-  save_dir: models/rppo_full
-  device: auto # auto, cpu, or cuda
+  # Many more episodes needed for the full board
+  num_episodes: 30000 # was 10000
+  num_iterations: 30000 # kept in sync for logging
+  eval_every: 1000 # eval less often (expensive games)
+  eval_episodes: 300 # more games per eval to reduce noise
+  save_dir: models/rppo_standard
+  device: auto # "auto" → cuda if available on Oscar
   seed: null
 
 agent:
   type: rppo
 
-  # RPPO hyperparameters (match RPPoAgent.__init__)
-  lr: 0.0003
-  gamma: 0.99
+  # RPPO hyperparameters
+  lr: 0.00015 # slightly lower LR for more stable updates
+  gamma: 0.995 # longer horizons on the full board
   gae_lambda: 0.95
   clip_eps: 0.2
-  k_epochs: 4
+  k_epochs: 5 # a bit more optimization per batch
   value_coef: 0.5
-  entropy_coef: 0.01
+  entropy_coef: 0.02 # more exploration for huge action space
   max_grad_norm: 0.5
 
-  # Network
-  hidden_size: 256
+  # Network (bigger model for standard board)
+  hidden_size: 512 # was 256
 
   # Training
-  batch_size: 64
+  batch_size: 256 # was 64; lower to 128 if you hit CUDA OOM
 
 wandb:
   enabled: true
   project: junqi-rppo
   entity: null
-  run_name: rppo_production_run
+  run_name: rppo_production_run_standard
   tags:
     - production
-    - junqi_8x3
+    - junqi_standard
     - rppo
     - self-play

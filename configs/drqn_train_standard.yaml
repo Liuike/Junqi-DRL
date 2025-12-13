@@ -1,13 +1,13 @@
 game:
-  mode: junqi_8x3
-  board_variant: small
+  mode: junqi_standard
+  board_variant: standard
 
 training:
-  num_episodes: 10000
-  num_iterations: 10000
+  num_episodes: 50000
+  num_iterations: 50000
   eval_every: 500
   eval_episodes: 200
-  save_dir: models/drqn_full
+  save_dir: models/drqn_standard
   device: auto
   seed: null
   
@@ -35,10 +35,11 @@ wandb:
   enabled: true
   project: junqi-drql
   entity: null
-  run_name: drqn_spatial_production_run
+  run_name: drqn_spatial_standard_board
   tags:
     - production
     - spatial
-    - junqi_8x3
+    - junqi_standard
+    - standard_board
     - dqn
     - self-play

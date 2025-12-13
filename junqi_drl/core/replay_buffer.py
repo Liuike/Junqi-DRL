@@ -1,5 +1,3 @@
-"""Replay buffer implementations for off-policy RL algorithms."""
-
 import random
 import numpy as np
 from collections import deque
@@ -108,24 +106,20 @@ class TemporalStratifiedReplayBuffer:
         """
         batch = []
         
-        # Count non-empty segments
         non_empty_segments = [seg for seg in self.segments if len(seg) > 0]
         
         if not non_empty_segments:
             return batch
         
-        # Calculate samples per segment (uniform across non-empty segments)
         samples_per_segment = batch_size // len(non_empty_segments)
         remainder = batch_size % len(non_empty_segments)
         
         for i, segment in enumerate(non_empty_segments):
-            # Add extra sample to first 'remainder' segments to reach exact batch_size
             n_samples = samples_per_segment + (1 if i < remainder else 0)
             n_samples = min(n_samples, len(segment))
             
             batch.extend(random.sample(list(segment), n_samples))
         
-        # If we still don't have enough, sample with replacement from all segments
         if len(batch) < batch_size:
             all_transitions = []
             for segment in non_empty_segments:

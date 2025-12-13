@@ -54,12 +54,11 @@ class RPPONetwork(nn.Module):
         batch_size, T, _ = obs.shape
         x = self.relu(self.fc1(obs))
         x = self.relu(self.fc2(x))
-        out, next_hidden = self.gru(x, hidden)  # out: (batch, T, hidden_size)
+        out, next_hidden = self.gru(x, hidden)
 
-        # Use the last timestep for policy/value heads
-        last = out[:, -1, :]  # (batch, hidden_size)
-        logits = self.policy_head(last)             # (batch, action_dim)
-        values = self.value_head(last).squeeze(-1)  # (batch,)
+        last = out[:, -1, :]
+        logits = self.policy_head(last)
+        values = self.value_head(last).squeeze(-1)
 
         return logits, values, next_hidden
 
@@ -76,12 +75,12 @@ class RPPORolloutBuffer:
         self.clear()
 
     def clear(self):
-        self.obs = []        # list of np.ndarray, shape (obs_dim,)
-        self.actions = []    # list of ints
-        self.logprobs = []   # list of floats
-        self.rewards = []    # list of floats
-        self.dones = []      # list of bools
-        self.values = []     # list of floats
+        self.obs = []
+        self.actions = []
+        self.logprobs = []
+        self.rewards = []
+        self.dones = []
+        self.values = []
 
     def add(self, obs, action, logprob, reward, done, value):
         self.obs.append(np.array(obs, dtype=np.float32))
@@ -149,12 +148,8 @@ class RPPoAgent:
 
         self.buffer = RPPORolloutBuffer()
 
-        # Hidden state for online interaction (batch_size=1)
         self.hidden = self.net.init_hidden(batch_size=1, device=self.device)
 
-    # ------------------------------------------------------------------
-    # Interaction helpers
-    # ------------------------------------------------------------------
     def reset_hidden(self):
         """Reset recurrent hidden state at the start of an episode."""
         self.hidden = self.net.init_hidden(batch_size=1, device=self.device)

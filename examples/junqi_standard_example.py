@@ -1,8 +1,3 @@
-"""
-Example script for Junqi with standard board setup.
-This version uses the full official board with predetermined piece positions.
-"""
-
 import sys
 from pathlib import Path
 

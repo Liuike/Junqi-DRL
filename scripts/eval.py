@@ -90,7 +90,7 @@ def evaluate_drqn(
         )
     
     drql_agent.load(model_path)
-    drql_agent.epsilon = 0.0  # Greedy evaluation
+    drql_agent.epsilon = 0.0 
     
     # Random opponent
     agent = RandomAgent(player_id=1)
@@ -107,7 +107,6 @@ def evaluate_drqn(
 
         while not state.is_terminal():
             current_player = state.current_player()
-            # current_player() may set terminal if no legal moves
             if state.is_terminal():
                 break
             

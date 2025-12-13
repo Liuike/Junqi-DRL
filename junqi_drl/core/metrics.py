@@ -1,5 +1,3 @@
-"""Centralized metrics tracking and logging for training."""
-
 from typing import Dict, Any, Optional
 from collections import defaultdict
 import numpy as np
@@ -12,13 +10,6 @@ except ImportError:
 
 
 class MetricsLogger:
-    """
-    Unified metrics logging for training.
-    
-    Handles both console logging and WandB integration with
-    graceful degradation if WandB is not available.
-    """
-    
     def __init__(
         self,
         use_wandb: bool = True,
@@ -69,12 +60,10 @@ class MetricsLogger:
             metrics: Dictionary of metric names to values
             step: Optional step/episode number for x-axis
         """
-        # Store in history
         for key, value in metrics.items():
             if isinstance(value, (int, float, np.number)):
                 self.metrics_history[key].append(value)
         
-        # Log to WandB
         if self.use_wandb and self.wandb_initialized:
             try:
                 wandb.log(metrics, step=step)

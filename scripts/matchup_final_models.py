@@ -100,11 +100,7 @@ def load_drql_agent(model_path: str, game_mode: str, player_id: int, device: str
     """Load DRQL agent from checkpoint."""
     game = pyspiel.load_game(game_mode)
     action_dim = game.num_distinct_actions()
-    
-    # Load checkpoint to inspect architecture
-    checkpoint = torch.load(model_path, map_location=device)
-    
-    # The best model uses spatial network
+        
     agent = DRQLAgent(
         player_id=player_id,
         action_dim=action_dim,
@@ -115,7 +111,7 @@ def load_drql_agent(model_path: str, game_mode: str, player_id: int, device: str
     )
     
     agent.load(model_path)
-    agent.epsilon = 0.0  # Greedy evaluation
+    agent.epsilon = 0.0  
     
     return agent
 
@@ -141,7 +137,6 @@ def load_rppo_agent(model_path: str, game_mode: str, player_id: int, device: str
 
 def load_transformer_agent(model_path: str, board_variant: str, player_id: int, device: str) -> TransformerAgent:
     """Load Transformer agent from checkpoint."""
-    # Based on transformer_train.yaml config
     agent = TransformerAgent(
         player_id=player_id,
         board_variant=board_variant,
@@ -185,28 +180,20 @@ def play_game(agent0, agent1, game, agent0_name: str, agent1_name: str, verbose:
     
     while not state.is_terminal():
         current_player = state.current_player()
-        # current_player() may set terminal if no legal moves
         if state.is_terminal():
             break
         
         agent = agents[current_player]
         legal_actions = state.legal_actions(current_player)
         
-        # Get action from agent
-        if hasattr(agent, 'choose_action'):
-            # DRQL, RPPO, or Transformer agent
-            action = agent.choose_action(state, legal_actions, eval_mode=True)
-        else:
-            # Fallback
-            action = agent.choose_action(state)
-        
+        action = agent.choose_action(state, legal_actions, eval_mode=True)
+
         if verbose and move_count % 50 == 0:
             print(f"  Move {move_count}: Player {current_player} ({['agent0', 'agent1'][current_player]})")
         
         state.apply_action(action)
         move_count += 1
     
-    # Determine winner
     returns = state.returns()
     if returns[0] > 0:
         winner = 0
@@ -306,10 +293,8 @@ def main():
     game = pyspiel.load_game(args.game_mode)
     board_variant = "small" if args.game_mode == "junqi_8x3" else "standard"
     
-    # Initialize results tracker
     results = MatchupResults()
     
-    # Define all model configurations
     models_config = [
         ("DRQL", lambda pid: load_drql_agent(str(drql_path), args.game_mode, pid, device)),
         ("RPPO", lambda pid: load_rppo_agent(str(rppo_path), args.game_mode, pid, device)),
@@ -322,7 +307,7 @@ def main():
     # Run all pairwise matchups
     for i, (name0, loader0) in enumerate(models_config):
         for j, (name1, loader1) in enumerate(models_config):
-            if i >= j:  # Skip self-play and duplicate matchups
+            if i >= j: 
                 continue
             
             print(f"\n{'='*80}")

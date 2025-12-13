@@ -1,50 +1,39 @@
-# Transformer PPO Training Configuration - Production Training
-# Full-scale training with WandB logging
-
 game:
   mode: junqi_standard
   board_variant: standard
 
 training:
-  num_iterations: 10000  # Long training for convergence
-  eval_every: 200       # Evaluate every 200 iterations
-  eval_episodes: 100    # More evaluation games for better statistics
-  save_dir: full_model_trained/transformer_standard  # Directory to save models
-  device: auto          # Device: cpu, cuda, or auto
+  num_iterations: 10000
+  eval_every: 200
+  eval_episodes: 100
+  save_dir: full_model_trained/transformer_standard
+  device: auto
   seed: null
 
 agent:
   type: transformer
-  # Model Architecture - Medium size for good performance
-  d_model: 256          # Transformer embedding dimension
-  nhead: 8              # Number of attention heads
-  num_layers: 4         # Number of transformer layers
-  dim_feedforward: 1024  # FFN dimension (4 * d_model)
-  dropout: 0.1          # Dropout rate
+  d_model: 256
+  nhead: 8
+  num_layers: 4
+  dim_feedforward: 1024
+  dropout: 0.1
   
-  # PPO Algorithm Parameters
-  lr_start: 0.0003      # Starting learning rate (1e-4)
-  lr_end: 0.00001      # Ending learning rate (5e-6)
-  gamma: 0.99           # Discount factor
-  gae_lambda: 0.95      # GAE lambda for advantage estimation
-  clip_coef: 0.2        # PPO clipping coefficient
-  vf_coef: 0.5          # Value function loss coefficient
-  ent_coef_start: 0.03  # Starting entropy coefficient
-  ent_coef_end: 0.001   # Ending entropy coefficient
+  lr_start: 0.0003
+  lr_end: 0.00001
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_coef: 0.2
+  vf_coef: 0.5
+  ent_coef_start: 0.03
+  ent_coef_end: 0.001
   
-  # Training Loop
-  num_steps: 2048       # Steps per iteration (larger rollout buffer)
-  minibatch_size: 128    # Minibatch size for PPO updates
-  update_epochs: 4      # Number of PPO update epochs per iteration
-  max_grad_norm: 0.5    # Maximum gradient norm for clipping
+  num_steps: 2048
+  minibatch_size: 128
+  update_epochs: 4
+  max_grad_norm: 0.5
 
 wandb:
   enabled: true
   project: junqi-transformer
   entity: null
   run_name: transformer_production_run_standard
-  # tags:
-  #   - production
-  #   - junqi_8x3
-  #   - ppo
-  #   - self-play

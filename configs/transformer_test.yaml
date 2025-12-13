@@ -1,12 +1,9 @@
-# Transformer PPO Training Configuration - Test/Debug
-# Minimal config for quick testing
-
 game:
   mode: junqi_8x3
   board_variant: small
 
 training:
-  num_iterations: 10  # Very short for testing
+  num_iterations: 10
   eval_every: 5
   eval_episodes: 5
   save_dir: models/transformer_test
@@ -15,14 +12,12 @@ training:
 
 agent:
   type: transformer
-  # Tiny model for fast testing
   d_model: 32
   nhead: 2
   num_layers: 1
   dim_feedforward: 128
   dropout: 0.1
   
-  # PPO parameters
   lr_start: 0.0001
   lr_end: 0.00001
   gamma: 0.99
@@ -32,8 +27,7 @@ agent:
   ent_coef_start: 0.02
   ent_coef_end: 0.001
   
-  # Training loop
-  num_steps: 64  # Small rollout buffer
+  num_steps: 64
   minibatch_size: 16
   update_epochs: 2
   max_grad_norm: 0.5

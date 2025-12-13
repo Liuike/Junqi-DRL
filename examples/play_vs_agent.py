@@ -1,10 +1,3 @@
-#!/usr/bin/env python3
-"""
-Interactive script to play Junqi against a trained agent.
-You can choose which model to play against (DRQL, RPPO, or Transformer)
-and which board size (8x3 small or standard).
-"""
-
 import sys
 from pathlib import Path
 

@@ -1,5 +1,3 @@
-"""Observation processing utilities for Junqi game states."""
-
 import numpy as np
 import torch
 from typing import Dict, Tuple

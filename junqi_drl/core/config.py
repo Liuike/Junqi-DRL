@@ -1,5 +1,3 @@
-"""Configuration management for Junqi DRL agents and training."""
-
 from dataclasses import dataclass, field, asdict
 from typing import Optional, Dict, Any, List
 import yaml
@@ -24,7 +22,7 @@ class GameConfig:
 class TrainingConfig:
     """General training hyperparameters."""
     num_episodes: int = 5000
-    num_iterations: int = 5000  # For PPO-style training
+    num_iterations: int = 5000  # For PPO training
     eval_every: int = 1000
     eval_episodes: int = 100
     save_dir: str = "models"
@@ -86,7 +84,6 @@ class TransformerConfig:
 @dataclass
 class RPPOConfig:
     """Recurrent PPO (RPPO) hyperparameters."""
-    # RL hyperparameters
     lr: float = 3e-4
     gamma: float = 0.99
     gae_lambda: float = 0.95
@@ -106,7 +103,7 @@ class RPPOConfig:
 
 @dataclass
 class WandbConfig:
-    """Weights & Biases configuration."""
+    """WandB configuration."""
     enabled: bool = True
     project: str = "junqi-drl"
     entity: Optional[str] = None
@@ -115,13 +112,6 @@ class WandbConfig:
 
 
 class Config:
-    """
-    Main configuration container.
-    
-    Supports loading from YAML files and provides dictionary conversion
-    for logging and serialization.
-    """
-    
     def __init__(
         self,
         game: Optional[GameConfig] = None,

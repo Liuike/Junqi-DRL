@@ -1,18 +1,7 @@
-#!/usr/bin/env python3
-"""
-Quick head-to-head battle script for testing individual model matchups.
-
-Usage examples:
-    python scripts/battle.py drql vs transformer --num_games 50
-    python scripts/battle.py rppo vs drql --num_games 100 --verbose
-    python scripts/battle.py transformer vs random --num_games 20
-"""
-
 import sys
 import os
 from pathlib import Path
 
-# Add project root to path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
@@ -92,7 +81,6 @@ def play_game(agent0, agent1, game, verbose: bool = False) -> int:
     """Play a single game. Returns 0 if agent0 wins, 1 if agent1 wins, -1 for draw."""
     state = game.new_initial_state()
     
-    # Reset hidden states
     if hasattr(agent0, 'reset_hidden'):
         agent0.reset_hidden()
     if hasattr(agent1, 'reset_hidden'):
@@ -103,18 +91,15 @@ def play_game(agent0, agent1, game, verbose: bool = False) -> int:
     
     while not state.is_terminal():
         current_player = state.current_player()
-        # current_player() may set terminal if no legal moves
         if state.is_terminal():
             break
         
         agent = agents[current_player]
         legal_actions = state.legal_actions(current_player)
         
-        # Get action
         if hasattr(agent, 'choose_action'):
             action = agent.choose_action(state, legal_actions, eval_mode=True)
         else:
-            # Fallback for agents without choose_action
             action = agent.choose_action(state)
         
         state.apply_action(action)
@@ -208,13 +193,11 @@ def main():
     print(f"Draws: {draws} ({draws/args.num_games:.1%})")
     print("="*60)
     
-    # Run swapped if requested
     if args.swap:
         print(f"\n{'='*60}")
         print(f"SWAPPED BATTLE: {name1} vs {name0}")
         print(f"{'='*60}\n")
         
-        # Reload agents with swapped IDs
         agent1_swap, _ = load_agent(args.agent1, 0, args.game_mode, device)
         agent0_swap, _ = load_agent(args.agent0, 1, args.game_mode, device)
         

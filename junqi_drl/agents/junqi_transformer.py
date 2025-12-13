@@ -57,11 +57,9 @@ class JunqiMoveTransformer(nn.Module):
         self._reset_parameters()
 
     def _reset_parameters(self) -> None:
-        # ... (Standard init) ...
         nn.init.xavier_uniform_(self.input_proj.weight)
         nn.init.normal_(self.row_embeddings, mean=0.0, std=0.02)
         nn.init.normal_(self.col_embeddings, mean=0.0, std=0.02)
-        # Init new heads
         nn.init.xavier_uniform_(self.query_head.weight)
         nn.init.xavier_uniform_(self.key_head.weight)
 
@@ -78,38 +76,26 @@ class JunqiMoveTransformer(nn.Module):
         """
         batch_size = x.shape[0]
         
-        # --- 1. Encode Board ---
-        tokens = x.reshape(batch_size, self.seq_len, self.channels) # (B, S, C)
+        tokens = x.reshape(batch_size, self.seq_len, self.channels)
         tokens = self.input_proj(tokens)
 
-        # Add 2D Positional Embeddings
         row_emb = self.row_embeddings.unsqueeze(1).expand(self.height, self.width, -1)
         col_emb = self.col_embeddings.unsqueeze(0).expand(self.height, self.width, -1)
         pos_emb = (row_emb + col_emb).reshape(1, self.seq_len, -1)
         tokens = tokens + pos_emb
 
-        encoded = self.encoder(tokens) # (B, S, d_model)
+        encoded = self.encoder(tokens)
 
-        # --- 2. [NEW] Compute Move Logits (Key-Query Attention) ---
-        # Query: will represent the starting square
-        # Key:  will represent the ending square
-        
-        Q = self.query_head(encoded) # (B, S, d_model)
-        K = self.key_head(encoded)   # (B, S, d_model)
+        Q = self.query_head(encoded)
+        K = self.key_head(encoded)
 
-        # Matrix Multiplication: (B, S, d) @ (B, d, S) -> (B, S, S)
-        # move_matrix[b, i, j] = Score of moving from i to j
-        move_matrix = torch.matmul(Q, K.transpose(-2, -1)) 
+        move_matrix = torch.matmul(Q, K.transpose(-2, -1))
         
-        # Scale by sqrt(d_model) (Standard attention scaling)
         d_k = Q.size(-1)
         move_matrix = move_matrix / (d_k ** 0.5)
 
-        # Flatten to match RL action space: (B, S * S)
-        # Index k corresponds to: From (k // S) -> To (k % S)
-        action_logits = move_matrix.flatten(start_dim=1) 
+        action_logits = move_matrix.flatten(start_dim=1)
 
-        # --- 3. Masking ---
         if mask is not None:
             if mask.shape[-1] != self.total_actions:
                 raise ValueError(
@@ -118,7 +104,6 @@ class JunqiMoveTransformer(nn.Module):
             illegal = mask <= 0
             action_logits = action_logits.masked_fill(illegal, -1e9)
 
-        # --- 4. Value ---
         pooled = encoded.mean(dim=1)
         values = self.value_head(pooled)
 

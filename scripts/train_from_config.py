@@ -36,7 +36,6 @@ def main():
             
             key, value = override.split('=', 1)
             
-            # Parse value (try to convert to appropriate type)
             try:
                 if value.lower() == 'true':
                     value = True
@@ -77,7 +76,6 @@ def main():
     else:
         device = torch.device(device_str)
     
-    # Dispatch to appropriate training function based on agent type
     if config.agent_type == "drqn":
         agent_cfg = config.agent_config
         

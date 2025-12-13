@@ -1,13 +1,10 @@
-# DRQN Training Configuration - Test/Debug
-# Minimal config for quick testing
-
 game:
   mode: junqi_8x3
   board_variant: small
 
 training:
-  num_episodes: 50  # Very short for testing
-  num_iterations: 50  # Not used for DRQN but required by config
+  num_episodes: 50
+  num_iterations: 50
   eval_every: 20
   eval_episodes: 5
   save_dir: models/drqn_test
@@ -16,18 +13,18 @@ training:
   
 agent:
   type: drqn
-  network_type: spatial  # Use spatial for testing (most common)
-  hidden_size: 128  # Smaller for faster testing
-  lr: 0.001  # Higher LR for faster learning in short test
+  network_type: spatial
+  hidden_size: 128
+  lr: 0.001
   gamma: 0.99
   epsilon_start: 1.0
   epsilon_min: 0.1
-  epsilon_decay: 0.95  # Faster decay for testing
-  batch_size: 32  # Smaller batch
-  replay_buffer_size: 10000  # Smaller buffer
+  epsilon_decay: 0.95
+  batch_size: 32
+  replay_buffer_size: 10000
   use_stratified_buffer: true
   num_segments: 4
-  target_update_freq: 50  # More frequent updates
+  target_update_freq: 50
   opponent_update_freq: 100
 
 wandb:

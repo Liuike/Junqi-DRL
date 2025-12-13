@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import os
 import sys
 from typing import Dict, List, Tuple
@@ -7,7 +6,6 @@ import numpy as np
 import torch
 import pyspiel
 
-# Make project root importable
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 try:
@@ -221,14 +219,11 @@ def train_rppo(
         episode_raw_rewards.append(raw_reward)
         episode_lengths.append(game_length)
 
-        # Map terminal return to final rewards for P0
-        # Strong penalty for draw (same convention as DRQL training)
         if raw_reward == 0:
             final_reward_p0 = -1.0
         else:
             final_reward_p0 = raw_reward  # +1 or -1
 
-        # Assign discounted reward to each P0 step
         gamma_discount = rppo_agent.gamma
         n_p0 = len(transitions_p0)
 
@@ -247,7 +242,6 @@ def train_rppo(
                 obs, action, discounted_reward, next_obs, done
             )
 
-        # Perform PPO update after every episode
         metrics = rppo_agent.train(batch_size=batch_size)
 
         if metrics is None:
@@ -330,15 +324,3 @@ def train_rppo(
     # Finish wandb run
     if use_wandb:
         wandb.finish()
-
-
-if __name__ == "__main__":
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    train_rppo(
-        num_episodes=5000,
-        eval_every=1000,
-        eval_episodes=100,
-        save_dir="models",
-        device=device,
-    )

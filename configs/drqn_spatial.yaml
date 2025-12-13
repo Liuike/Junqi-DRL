@@ -1,22 +1,19 @@
-# DRQN Training Configuration - Spatial Network
-# Train spatial DRQN on junqi_8x3 board
-
 game:
   mode: junqi_8x3
   board_variant: small
 
 training:
   num_episodes: 5000
-  num_iterations: 5000  # Not used for DRQN but required by config
+  num_iterations: 5000
   eval_every: 1000
   eval_episodes: 100
   save_dir: models/drqn
-  device: auto  # auto, cpu, or cuda
+  device: auto
   seed: null
   
 agent:
   type: drqn
-  network_type: spatial  # flat or spatial
+  network_type: spatial
   hidden_size: 256
   lr: 0.0005
   gamma: 0.99

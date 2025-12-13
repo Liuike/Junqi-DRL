@@ -1,5 +1,7 @@
 # This is the repository for the final project of CSCI1470 at Brown University
 
+<img src="DL Junqi Poster.jpg" style="width: 1200px; height: 800px;"/>
+
 To run the project, either:
 
 a. 
